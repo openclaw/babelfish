@@ -4,6 +4,8 @@
 
 - Bound imported command-hook stdout and stderr so noisy hooks cannot exhaust
   OpenClaw memory before their timeout.
+- Add a Docker constrained-memory matrix covering build, tests, packaging,
+  three-app plugin lifecycle, generated tools, and MCP stdio down to 256 MiB.
 
 ## 0.1.0 — 2026-07-27
 

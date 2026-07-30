@@ -200,6 +200,15 @@ npm run check
 The test suite covers source-runtime tools, commands, skills, hook translation,
 bundle discovery, transactional install/uninstall, and the optional MCP server.
 
+Run the Docker constrained-memory matrix:
+
+```bash
+npm run test:low-memory
+```
+
+It exercises the full gate at 1 GiB, runtime tests and end-to-end flows at
+512 MiB, and install/list/uninstall plus MCP stdio at 256 MiB.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, compatibility

@@ -55,6 +55,8 @@
   "scripts": {
     "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.json && node scripts/build.mjs",
     "test": "vitest run",
+    "test:low-memory": "./scripts/run-low-memory-matrix.sh",
+    "test:low-memory:e2e": "node test/low-memory/e2e.mjs",
     "check": "npm run build && npm test",
     "prepack": "npm run build",
     "pack:check": "node scripts/check-package.mjs",
