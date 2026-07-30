@@ -2,6 +2,9 @@
 
 ## 0.1.1 (Unreleased)
 
+- Bound imported command-hook stdout and stderr so noisy hooks cannot exhaust
+  OpenClaw memory before their timeout.
+
 ## 0.1.0 — 2026-07-27
 
 - First release: bring supported Claude Code, Codex, and Hermes Agent plugins into OpenClaw from their Git repositories.

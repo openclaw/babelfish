@@ -54,6 +54,38 @@ describe("bundle plugins", () => {
     expect(results.map(hookAdditionalContext)).toEqual(["from hook"]);
   }, 30_000);
 
+  it("terminates hooks that exceed the output limit", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const pluginRoot = path.join(rootDir, "codex", "fixture");
+    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    await fs.writeFile(
+      path.join(pluginRoot, "noisy.mjs"),
+      "process.stdout.write(Buffer.alloc(2 * 1024 * 1024, 120)); setTimeout(() => {}, 30_000);",
+    );
+    await fs.writeFile(
+      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+      JSON.stringify({
+        hooks: {
+          SessionStart: [{ hooks: [{ type: "command", command: "node noisy.mjs" }] }],
+        },
+      }),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const config = {
+      rootDir,
+      installDir: path.join(rootDir, "hermes"),
+      python: "python3",
+      timeoutMs: fixtureTimeoutMs,
+      env: {},
+    };
+    try {
+      await expect(invokeBundleHooks(config, "SessionStart", {})).resolves.toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("1048576-byte output limit"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("normalizes hook decisions", () => {
     expect(hookBlock({ decision: "block", reason: "no" })).toEqual({ block: true, reason: "no" });
     expect(hookUpdatedInput({ hookSpecificOutput: { updatedInput: { value: 2 } } })).toEqual({ value: 2 });

@@ -26,6 +26,7 @@ const SUPPORTED_HOOK_EVENTS = new Set([
   "SubagentStop",
   "Stop",
 ]);
+const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 
 export type BundleServer = {
   name: string;
@@ -802,6 +803,8 @@ function runHookCommand(
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
     let settled = false;
     const finish = (
       error?: Error,
@@ -814,15 +817,38 @@ function runHookCommand(
       clearTimeout(timer);
       error ? reject(error) : resolve(result ?? { stdout: "" });
     };
-    const timer = setTimeout(() => {
+    const terminate = () => {
       terminateShellProcessTree(child);
       setTimeout(() => {
         terminateShellProcessTree(child, process.platform, "SIGKILL");
       }, 250).unref();
+    };
+    const capture = (stream: "stdout" | "stderr", chunks: Buffer[], chunk: Buffer) => {
+      if (settled) {
+        return;
+      }
+      if (stream === "stdout") {
+        stdoutBytes += chunk.length;
+        if (stdoutBytes <= MAX_HOOK_OUTPUT_BYTES) {
+          chunks.push(chunk);
+          return;
+        }
+      } else {
+        stderrBytes += chunk.length;
+        if (stderrBytes <= MAX_HOOK_OUTPUT_BYTES) {
+          chunks.push(chunk);
+          return;
+        }
+      }
+      terminate();
+      finish(new Error(`Hook ${stream} exceeded the ${MAX_HOOK_OUTPUT_BYTES}-byte output limit`));
+    };
+    const timer = setTimeout(() => {
+      terminate();
       finish(new Error(`Hook timed out after ${timeoutMs}ms`));
     }, timeoutMs);
-    child.stdout!.on("data", (chunk: Buffer) => stdout.push(chunk));
-    child.stderr!.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.stdout!.on("data", (chunk: Buffer) => capture("stdout", stdout, chunk));
+    child.stderr!.on("data", (chunk: Buffer) => capture("stderr", stderr, chunk));
     child.on("error", (error) => finish(error));
     child.on("close", (code) => {
       if (code === 0) {
