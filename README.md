@@ -91,6 +91,7 @@ format does not provide that surface.
 | Skills and support files | Full | Full | Full | Copied into native OpenClaw plugin skills |
 | User prompt commands | Full | N/A | Partial | Hermes commands become native slash commands; Claude commands become user-only skills |
 | Terminal CLI commands | Full | N/A | N/A | Registered as top-level `openclaw <command>` commands |
+| Command-hook process output | N/A | 1 MiB per stream | 1 MiB per stream | Codex and Claude Code command hooks are terminated and reported as failed if stdout or stderr exceeds the limit |
 | Plugin-defined agents | N/A | N/A | Partial | Imported as user-only skills; model and tool isolation are not preserved |
 | Pre-tool command hooks | Full | Full | Full | Blocks and argument rewrites map to OpenClaw's pre-tool hook |
 | Permission command hooks | N/A | No | No | OpenClaw has no equivalent approval-boundary event |
