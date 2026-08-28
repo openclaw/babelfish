@@ -59,7 +59,7 @@ jobs:
           $shim | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Pin npm
-        run: npm install --global npm@11.18.0
+        run: npm install --global npm@11.19.1
 
       - name: Install dependencies
         run: npm ci

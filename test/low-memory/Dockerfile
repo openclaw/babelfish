@@ -4,7 +4,7 @@ RUN apt-get update \
   && apt-get install --yes --no-install-recommends ca-certificates git python3 time \
   && rm -rf /var/lib/apt/lists/*
 
-RUN npm install --global npm@11.18.0
+RUN npm install --global npm@11.19.1
 
 WORKDIR /workspace
 
