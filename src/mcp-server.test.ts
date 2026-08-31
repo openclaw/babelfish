@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { buildHermesMcpToolIndex, createHermesMcpServer } from "./mcp-server.js";
+import { buildHermesMcpToolIndex, createHermesMcpServer, MAX_RUNNING_TASKS } from "./mcp-server.js";
+import * as hermesPython from "./hermes-python.js";
 
 async function copyFixture(target: string, fixtureName: string, installedName: string): Promise<void> {
   const fixture = path.join(process.cwd(), "test/fixtures", fixtureName);
@@ -186,6 +187,76 @@ describe("Hermes MCP server", () => {
       }
       expect(finalStatus).toBe("completed");
     } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("rejects a ninth concurrent babelfish_task_start", async () => {
+    const spy = vi.spyOn(hermesPython, "callHermesTool").mockImplementation((_config, _params, options) => {
+      return new Promise((_resolve, reject) => {
+        const abort = () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        if (options?.signal?.aborted) {
+          abort();
+          return;
+        }
+        options?.signal?.addEventListener("abort", abort, { once: true });
+      });
+    });
+
+    const server = createHermesMcpServer({
+      installDir: await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-cap-")),
+      python: "python3",
+      timeoutMs: 10000,
+      env: {},
+    });
+    const client = new Client({ name: "test", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const startedIds: string[] = [];
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      for (let index = 0; index < MAX_RUNNING_TASKS; index += 1) {
+        const started = await client.callTool({
+          name: "babelfish_task_start",
+          arguments: { kind: "tool", name: "simple_echo", args: { value: `hold-${index}` } },
+        });
+        expect(started.isError).toBeFalsy();
+        const task = JSON.parse(String(started.content?.[0]?.text));
+        expect(task.status).toBe("running");
+        startedIds.push(task.id);
+      }
+
+      const held = await client.callTool({
+        name: "babelfish_task_status",
+        arguments: { id: startedIds[0] },
+      });
+      expect(JSON.parse(String(held.content?.[0]?.text)).status).toBe("running");
+
+      const overflow = await client.callTool({
+        name: "babelfish_task_start",
+        arguments: { kind: "tool", name: "simple_echo", args: { value: "overflow" } },
+      });
+      expect(overflow.isError).toBe(true);
+      expect(String(overflow.content?.[0]?.text)).toBe(
+        `Too many running Babelfish tasks (max ${MAX_RUNNING_TASKS})`,
+      );
+
+      const released = startedIds.pop();
+      await client.callTool({ name: "babelfish_task_stop", arguments: { id: released } });
+      const afterStop = await client.callTool({
+        name: "babelfish_task_start",
+        arguments: { kind: "tool", name: "simple_echo", args: { value: "after-stop" } },
+      });
+      expect(afterStop.isError).toBeFalsy();
+      const resumed = JSON.parse(String(afterStop.content?.[0]?.text));
+      expect(resumed.status).toBe("running");
+      startedIds.push(resumed.id);
+    } finally {
+      for (const id of startedIds) {
+        await client.callTool({ name: "babelfish_task_stop", arguments: { id } });
+      }
+      spy.mockRestore();
       await client.close();
       await server.close();
     }

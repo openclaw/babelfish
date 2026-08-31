@@ -43,7 +43,18 @@ type TaskState =
 
 const tasks = new Map<string, TaskState>();
 const MAX_FINISHED_TASKS = 100;
+export const MAX_RUNNING_TASKS = 8;
 let nextTaskId = 1;
+
+function runningTaskCount(): number {
+  let count = 0;
+  for (const task of tasks.values()) {
+    if (task.status === "running") {
+      count += 1;
+    }
+  }
+  return count;
+}
 
 function trimFinishedTasks(): void {
   const finished = [...tasks.values()]
@@ -114,7 +125,7 @@ function bridgeTools(): Tool[] {
     },
     {
       name: "babelfish_task_start",
-      description: "Run an imported tool or command in the background for later polling.",
+      description: `Run an imported tool or command in the background for later polling. At most ${MAX_RUNNING_TASKS} tasks may run at once.`,
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -278,6 +289,17 @@ export function createHermesMcpServer(config: HermesBridgeConfig): Server {
       const name = typeof args.name === "string" ? args.name.trim() : "";
       if (!name) {
         return { isError: true, content: [{ type: "text", text: "name is required" }] };
+      }
+      if (runningTaskCount() >= MAX_RUNNING_TASKS) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Too many running Babelfish tasks (max ${MAX_RUNNING_TASKS})`,
+            },
+          ],
+        };
       }
       const id = `hermes-task-${nextTaskId++}`;
       const startedAt = Date.now();

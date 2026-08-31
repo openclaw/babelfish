@@ -79,7 +79,7 @@ Restart OpenClaw after installing or removing a plugin. OpenClaw plugin metadata
 
 ## Optional MCP compatibility mode
 
-Use this mode only when an MCP client needs direct access to installed Hermes plugins without loading Babelfish as a native OpenClaw plugin. It starts a stdio MCP server that exposes available Hermes tools and commands, a read-only installed-plugin listing, and helpers for starting, checking, or stopping long-running Hermes calls.
+Use this mode only when an MCP client needs direct access to installed Hermes plugins without loading Babelfish as a native OpenClaw plugin. It starts a stdio MCP server that exposes available Hermes tools and commands, a read-only installed-plugin listing, and helpers for starting, checking, or stopping long-running Hermes calls. `babelfish_task_start` rejects a new start when eight tasks are already running.
 
 This mode covers Hermes plugins only. It does not provide Babelfish's native OpenClaw skills, hooks, middleware, or generated CLI commands.
 

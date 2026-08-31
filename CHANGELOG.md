@@ -2,6 +2,7 @@
 
 ## 0.1.1 (Unreleased)
 
+- Reject `babelfish_task_start` when eight isolated Hermes tasks are already running.
 - Refresh the MCP SDK, development dependencies, npm 11 tooling, and pinned CodeQL actions while retaining Node.js 22.19 support.
 - Bound imported command-hook stdout and stderr so noisy hooks cannot exhaust
   OpenClaw memory before their timeout.
