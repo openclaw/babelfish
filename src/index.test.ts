@@ -37,9 +37,10 @@ describe("native OpenClaw hook entry", () => {
       );
       const monitorRoot = path.join(bundleRoot, "claude-code", "monitor-plugin");
       const monitorPidPath = path.join(bundleRoot, "monitor-child.pid");
+      // Readiness must follow the PID write so the test can safely inspect the child.
       const monitorCommand = process.platform === "win32"
         ? 'node "%CLAUDE_PLUGIN_ROOT%\\monitor.mjs"'
-        : `printf 'ready\\n'; sleep 30 </dev/null >/dev/null 2>&1 & echo $! > ${JSON.stringify(monitorPidPath)}`;
+        : `sleep 30 </dev/null >/dev/null 2>&1 & echo $! > ${JSON.stringify(monitorPidPath)}; printf 'ready\\n'`;
       await fs.mkdir(path.join(monitorRoot, ".claude-plugin"), { recursive: true });
       await fs.mkdir(path.join(monitorRoot, "monitors"));
       await fs.writeFile(
@@ -135,10 +136,11 @@ describe("native OpenClaw hook entry", () => {
           workspaceDir: path.join(bundleRoot, "missing-workspace"),
         },
       );
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(api.logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining("monitor-plugin/status failed to start"),
-      );
+      await vi.waitFor(() => {
+        expect(api.logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining("monitor-plugin/status failed to start"),
+        );
+      }, { timeout: 5000 });
       await hooks.get("session_end")?.(
         { sessionId: "broken-monitor-session" },
         { sessionId: "broken-monitor-session" },
