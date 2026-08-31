@@ -27,6 +27,8 @@ const SUPPORTED_HOOK_EVENTS = new Set([
   "Stop",
 ]);
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
+export const MAX_HOOK_JSON_FILES = 50;
+export const MAX_HOOK_WALK_DEPTH = 8;
 
 export type BundleServer = {
   name: string;
@@ -333,20 +335,26 @@ async function hookFiles(root: string, candidate: string): Promise<string[]> {
     return [target];
   }
   const files: string[] = [];
-  async function walk(directory: string): Promise<void> {
+  async function walk(directory: string, depth: number): Promise<void> {
+    if (depth > MAX_HOOK_WALK_DEPTH) {
+      throw new Error(`Plugin hook tree exceeded the ${MAX_HOOK_WALK_DEPTH}-directory depth limit`);
+    }
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
       const child = path.join(directory, entry.name);
       if (entry.isSymbolicLink()) {
         throw new Error(`Plugin hook path uses a symlink: ${path.relative(root, child)}`);
       }
       if (entry.isDirectory()) {
-        await walk(child);
+        await walk(child, depth + 1);
       } else if (entry.isFile() && entry.name.endsWith(".json")) {
+        if (files.length >= MAX_HOOK_JSON_FILES) {
+          throw new Error(`Plugin hook tree exceeded the ${MAX_HOOK_JSON_FILES}-file limit`);
+        }
         files.push(child);
       }
     }
   }
-  await walk(target);
+  await walk(target, 0);
   return files.sort();
 }
 

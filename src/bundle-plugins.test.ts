@@ -7,6 +7,8 @@ import {
   hookUpdatedInput,
   inspectBundlePlugin,
   invokeBundleHooks,
+  MAX_HOOK_JSON_FILES,
+  MAX_HOOK_WALK_DEPTH,
 } from "./bundle-plugins.js";
 
 const fixtureTimeoutMs = 15_000;
@@ -305,5 +307,83 @@ describe("bundle plugins", () => {
       { decision: "block", reason: "Blocked by fixture Stop hook" },
     ]);
     await expect(invokeBundleHooks(config, "SessionEnd", {})).resolves.toEqual([]);
+  });
+
+  it("rejects a hook directory with more than 50 JSON files", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-files-"));
+    const hooksDir = path.join(root, "hooks");
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(hooksDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "too-many-hooks", hooks: "./hooks" }),
+    );
+    const hook = { SessionStart: [{ hooks: [{ type: "command", command: "exit 0" }] }] };
+    for (let index = 0; index < MAX_HOOK_JSON_FILES + 1; index += 1) {
+      await fs.writeFile(
+        path.join(hooksDir, `hook-${String(index).padStart(2, "0")}.json`),
+        JSON.stringify({ hooks: hook }),
+      );
+    }
+    await expect(inspectBundlePlugin("codex", root)).rejects.toThrow(
+      `Plugin hook tree exceeded the ${MAX_HOOK_JSON_FILES}-file limit`,
+    );
+  });
+
+  it("loads a hook directory at the 50-file cap", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-cap-"));
+    const hooksDir = path.join(root, "hooks");
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(hooksDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "hook-file-cap", hooks: "./hooks" }),
+    );
+    const hook = { SessionStart: [{ hooks: [{ type: "command", command: "exit 0" }] }] };
+    for (let index = 0; index < MAX_HOOK_JSON_FILES; index += 1) {
+      await fs.writeFile(
+        path.join(hooksDir, `hook-${String(index).padStart(2, "0")}.json`),
+        JSON.stringify({ hooks: hook }),
+      );
+    }
+    const plugin = await inspectBundlePlugin("codex", root);
+    expect(plugin.hooks).toHaveLength(MAX_HOOK_JSON_FILES);
+  });
+
+  it("rejects a hook directory deeper than 8 levels", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-depth-"));
+    const segments = Array.from({ length: MAX_HOOK_WALK_DEPTH + 1 }, (_, index) => `d${index}`);
+    const deepDir = path.join(root, "hooks", ...segments);
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(deepDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "deep-hooks", hooks: "./hooks" }),
+    );
+    await fs.writeFile(
+      path.join(deepDir, "session.json"),
+      JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: "exit 0" }] }] } }),
+    );
+    await expect(inspectBundlePlugin("codex", root)).rejects.toThrow(
+      `Plugin hook tree exceeded the ${MAX_HOOK_WALK_DEPTH}-directory depth limit`,
+    );
+  });
+
+  it("loads a hook file at the 8-directory depth cap", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-depth-ok-"));
+    const segments = Array.from({ length: MAX_HOOK_WALK_DEPTH }, (_, index) => `d${index}`);
+    const deepDir = path.join(root, "hooks", ...segments);
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(deepDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "depth-ok", hooks: "./hooks" }),
+    );
+    await fs.writeFile(
+      path.join(deepDir, "session.json"),
+      JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: "exit 0" }] }] } }),
+    );
+    const plugin = await inspectBundlePlugin("codex", root);
+    expect(plugin.hooks).toEqual([expect.objectContaining({ event: "SessionEnd" })]);
   });
 });

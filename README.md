@@ -41,7 +41,7 @@ Babelfish preserves source names when they are unique and qualifies collisions w
 | Agent and MCP tools | Native tools that retain the source JSON schema |
 | Skills and support files | Native OpenClaw skills with referenced files intact |
 | Prompt and terminal commands | User-invoked skills or top-level CLI commands when the source format supports them |
-| Compatible hooks | Matching lifecycle, prompt, tool, compaction, and subagent hooks |
+| Compatible hooks | Matching lifecycle, prompt, tool, compaction, and subagent hooks. Hook directories stop after 50 JSON files or 8 nested directories |
 | Compatible middleware | Matching prompt-build and tool-result middleware |
 | Unsupported behavior | Recorded during generation and reported at Gateway startup |
 

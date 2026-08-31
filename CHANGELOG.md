@@ -2,6 +2,7 @@
 
 ## 0.1.1 (Unreleased)
 
+- Cap imported plugin hook directory walks at 50 JSON files and 8 directory levels.
 - Refresh the MCP SDK, development dependencies, npm 11 tooling, and pinned CodeQL actions while retaining Node.js 22.19 support.
 - Bound imported command-hook stdout and stderr so noisy hooks cannot exhaust
   OpenClaw memory before their timeout.
