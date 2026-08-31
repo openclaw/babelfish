@@ -27,6 +27,7 @@ const SUPPORTED_HOOK_EVENTS = new Set([
   "Stop",
 ]);
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
+const MAX_HOOK_STDIN_BYTES = MAX_HOOK_OUTPUT_BYTES;
 
 export type BundleServer = {
   name: string;
@@ -793,6 +794,12 @@ function runHookCommand(
   payload: JsonObject,
   timeoutMs: number,
 ): Promise<{ stdout: string; blocked?: boolean; blockReason?: string }> {
+  const stdin = JSON.stringify(payload);
+  if (Buffer.byteLength(stdin, "utf8") > MAX_HOOK_STDIN_BYTES) {
+    return Promise.reject(
+      new Error(`Hook stdin exceeded the ${MAX_HOOK_STDIN_BYTES}-byte payload limit`),
+    );
+  }
   return new Promise((resolve, reject) => {
     const child = spawnShellCommand(command, {
       cwd,
@@ -863,6 +870,6 @@ function runHookCommand(
         finish(new Error(Buffer.concat(stderr).toString("utf8") || `Hook exited with ${code}`));
       }
     });
-    child.stdin!.end(JSON.stringify(payload));
+    child.stdin!.end(stdin);
   });
 }

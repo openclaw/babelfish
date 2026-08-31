@@ -16,6 +16,7 @@ Babelfish translates plugin behavior from Claude Code, Codex, and Hermes Agent i
 | User prompt commands | Full | N/A | Partial | Hermes commands become native slash commands; Claude commands become user-only skills |
 | Terminal CLI commands | Full | N/A | N/A | Registered as top-level `openclaw <command>` commands |
 | Command-hook process output | N/A | 1 MiB per stream | 1 MiB per stream | Codex and Claude Code command hooks are terminated and reported as failed if stdout or stderr exceeds the limit |
+| Command-hook process stdin | N/A | 1 MiB payload | 1 MiB payload | Codex and Claude Code command hooks are skipped if the JSON event written to stdin exceeds 1 MiB |
 | Plugin-defined agents | N/A | N/A | Partial | Imported as user-only skills; model and tool isolation are not preserved |
 | Pre-tool command hooks | Full | Full | Full | Blocks and argument rewrites map to OpenClaw's pre-tool hook |
 | Permission command hooks | N/A | No | No | OpenClaw has no equivalent approval-boundary event |

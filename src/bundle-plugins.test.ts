@@ -11,6 +11,11 @@ import {
 
 const fixtureTimeoutMs = 15_000;
 
+function hookPayloadWithByteSize(bytes: number): Record<string, unknown> {
+  const overhead = Buffer.byteLength('{"tool_response":""}', "utf8");
+  return { tool_response: "x".repeat(bytes - overhead) };
+}
+
 async function fixture(app: "claude-code" | "codex") {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), `babelfish-${app}-`));
   const manifestDir = app === "codex" ? ".codex-plugin" : ".claude-plugin";
@@ -85,6 +90,68 @@ describe("bundle plugins", () => {
       warn.mockRestore();
     }
   });
+
+  it("rejects hooks whose stdin payload exceeds 1 MiB", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const pluginRoot = path.join(rootDir, "codex", "fixture");
+    const marker = path.join(pluginRoot, "ran.txt");
+    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    await fs.writeFile(
+      path.join(pluginRoot, "reader.mjs"),
+      `import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(marker)}, "ran"); process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({ok:true})));`,
+    );
+    await fs.writeFile(
+      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+      JSON.stringify({
+        hooks: {
+          PostToolUse: [{ hooks: [{ type: "command", command: "node reader.mjs" }] }],
+        },
+      }),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const config = {
+      rootDir,
+      installDir: path.join(rootDir, "hermes"),
+      python: "python3",
+      timeoutMs: fixtureTimeoutMs,
+      env: {},
+    };
+    try {
+      await expect(invokeBundleHooks(config, "PostToolUse", hookPayloadWithByteSize(1024 * 1024 + 1))).resolves.toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("1048576-byte payload limit"));
+      await expect(fs.access(marker)).rejects.toThrow();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("runs hooks whose stdin payload is exactly 1 MiB", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const pluginRoot = path.join(rootDir, "codex", "fixture");
+    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    await fs.writeFile(
+      path.join(pluginRoot, "reader.mjs"),
+      "process.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify({hookSpecificOutput:{additionalContext:'ok'}})));",
+    );
+    await fs.writeFile(
+      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+      JSON.stringify({
+        hooks: {
+          PostToolUse: [{ hooks: [{ type: "command", command: "node reader.mjs" }] }],
+        },
+      }),
+    );
+    const config = {
+      rootDir,
+      installDir: path.join(rootDir, "hermes"),
+      python: "python3",
+      timeoutMs: fixtureTimeoutMs,
+      env: {},
+    };
+    await expect(
+      invokeBundleHooks(config, "PostToolUse", hookPayloadWithByteSize(1024 * 1024)),
+    ).resolves.toEqual([{ hookSpecificOutput: { additionalContext: "ok" } }]);
+  }, 30_000);
 
   it("normalizes hook decisions", () => {
     expect(hookBlock({ decision: "block", reason: "no" })).toEqual({ block: true, reason: "no" });
