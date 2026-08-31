@@ -38,7 +38,7 @@ Babelfish preserves source names when they are unique and qualifies collisions w
 
 | Source contribution | OpenClaw behavior |
 | --- | --- |
-| Agent and MCP tools | Native tools that retain the source JSON schema |
+| Agent and MCP tools | Native tools that retain the source JSON schema. MCP `tools/list` stops after 50 pages and rejects a repeated cursor |
 | Skills and support files | Native OpenClaw skills with referenced files intact |
 | Prompt and terminal commands | User-invoked skills or top-level CLI commands when the source format supports them |
 | Compatible hooks | Matching lifecycle, prompt, tool, compaction, and subagent hooks |

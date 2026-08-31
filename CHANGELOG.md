@@ -2,6 +2,10 @@
 
 ## 0.1.1 (Unreleased)
 
+- Cap MCP `tools/list` pagination during plugin inspect so a bad server cannot
+  loop forever or exhaust memory.
+- Share one inspect deadline across all `tools/list` pages so a slow unique
+  cursor cannot reset the timeout on every page.
 - Refresh the MCP SDK, development dependencies, npm 11 tooling, and pinned CodeQL actions while retaining Node.js 22.19 support.
 - Bound imported command-hook stdout and stderr so noisy hooks cannot exhaust
   OpenClaw memory before their timeout.

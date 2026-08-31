@@ -10,7 +10,7 @@ Babelfish translates plugin behavior from Claude Code, Codex, and Hermes Agent i
 | --- | --- | --- | --- | --- |
 | Manifest metadata | Full | Full | Full | Used for discovery, names, versions, and descriptions |
 | Native source-runtime tools | Full | N/A | N/A | Generated as native OpenClaw tools with the source schema |
-| MCP tools | N/A | Full | Full | Generated as native tools; stdio, HTTP, and SSE work without interactive auth |
+| MCP tools | N/A | Full | Full | Generated as native tools; stdio, HTTP, and SSE work without interactive auth. Inspection follows at most 50 `tools/list` pages and rejects a repeated cursor |
 | MCP resources and prompts | N/A | Partial | Partial | Exposed as generated list/read/get native tools rather than dedicated resource or prompt UI |
 | Skills and support files | Full | Full | Full | Copied into native OpenClaw plugin skills |
 | User prompt commands | Full | N/A | Partial | Hermes commands become native slash commands; Claude commands become user-only skills |

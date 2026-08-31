@@ -27,6 +27,7 @@ const SUPPORTED_HOOK_EVENTS = new Set([
   "Stop",
 ]);
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
+const MAX_LIST_TOOLS_PAGES = 50;
 
 export type BundleServer = {
   name: string;
@@ -622,10 +623,30 @@ export async function inspectBundleServer(
     const tools = [];
     if (capabilities.tools) {
       let cursor: string | undefined;
+      const seenCursors = new Set<string>();
+      let pages = 0;
+      const walkStarted = Date.now();
       do {
-        const page = await client.listTools(cursor ? { cursor } : undefined, { timeout: timeoutMs });
+        if (pages >= MAX_LIST_TOOLS_PAGES) {
+          throw new Error(`MCP tools/list exceeded ${MAX_LIST_TOOLS_PAGES} pages`);
+        }
+        const remaining = timeoutMs - (Date.now() - walkStarted);
+        if (remaining <= 0) {
+          throw new Error(`MCP tools/list walk timed out after ${timeoutMs}ms`);
+        }
+        pages += 1;
+        const page = await client.listTools(cursor ? { cursor } : undefined, { timeout: remaining });
         tools.push(...page.tools);
-        cursor = typeof page.nextCursor === "string" ? page.nextCursor : undefined;
+        const next = typeof page.nextCursor === "string" && page.nextCursor !== ""
+          ? page.nextCursor
+          : undefined;
+        if (next !== undefined && seenCursors.has(next)) {
+          throw new Error("MCP tools/list repeated cursor");
+        }
+        if (next !== undefined) {
+          seenCursors.add(next);
+        }
+        cursor = next;
       } while (cursor);
     }
     return { capabilities, tools };

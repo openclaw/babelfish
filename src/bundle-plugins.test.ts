@@ -1,12 +1,16 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   hookAdditionalContext,
   hookBlock,
   hookUpdatedInput,
   inspectBundlePlugin,
+  inspectBundleServer,
   invokeBundleHooks,
+  type BundlePlugin,
+  type BundleServer,
 } from "./bundle-plugins.js";
 
 const fixtureTimeoutMs = 15_000;
@@ -305,5 +309,97 @@ describe("bundle plugins", () => {
       { decision: "block", reason: "Blocked by fixture Stop hook" },
     ]);
     await expect(invokeBundleHooks(config, "SessionEnd", {})).resolves.toEqual([]);
+  });
+});
+
+function bundlePlugin(root: string): BundlePlugin {
+  return {
+    app: "codex",
+    key: "fixture",
+    name: "fixture",
+    version: "1",
+    description: "",
+    path: root,
+    skillDirs: [],
+    servers: [],
+    hooks: [],
+    outputStyles: [],
+    monitors: [],
+    unsupported: [],
+  };
+}
+
+async function writePagerServer(
+  root: string,
+  mode: "repeat" | "increment" | "two-page" | "slow-increment",
+): Promise<BundleServer> {
+  const sdk = path.join(process.cwd(), "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
+  const sdkUrl = (file: string) => pathToFileURL(path.join(sdk, file)).href;
+  await fs.writeFile(
+    path.join(root, "pager.mjs"),
+    `import { Server } from ${JSON.stringify(sdkUrl("server/index.js"))};
+import { StdioServerTransport } from ${JSON.stringify(sdkUrl("server/stdio.js"))};
+import { ListToolsRequestSchema } from ${JSON.stringify(sdkUrl("types.js"))};
+const mode = ${JSON.stringify(mode)};
+let page = 0;
+const server = new Server({name:"pager",version:"1"},{capabilities:{tools:{}}});
+server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+  page += 1;
+  const tool = {name: "tool-" + page, inputSchema: {type: "object"}};
+  if (mode === "repeat") {
+    return {tools: [tool], nextCursor: "same"};
+  }
+  if (mode === "increment" || mode === "slow-increment") {
+    if (mode === "slow-increment") {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+    return {tools: [tool], nextCursor: "page-" + page};
+  }
+  const cursor = request.params?.cursor;
+  if (!cursor) {
+    return {tools: [{name: "alpha", inputSchema: {type: "object"}}], nextCursor: "p2"};
+  }
+  return {tools: [{name: "beta", inputSchema: {type: "object"}}]};
+});
+await server.connect(new StdioServerTransport());
+`,
+  );
+  return {
+    name: "pager",
+    config: { command: "node", args: ["pager.mjs"] },
+    baseDir: root,
+  };
+}
+
+describe("inspectBundleServer tools/list pagination", () => {
+  it("collects tools across a finite cursor page", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-pager-"));
+    const server = await writePagerServer(root, "two-page");
+    const inspection = await inspectBundleServer(bundlePlugin(root), server, 10_000);
+    expect(inspection.tools.map((tool) => tool.name)).toEqual(["alpha", "beta"]);
+  }, 15_000);
+
+  it("rejects a repeated tools/list cursor", { timeout: 8_000 }, async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-pager-"));
+    const server = await writePagerServer(root, "repeat");
+    await expect(inspectBundleServer(bundlePlugin(root), server, 10_000)).rejects.toThrow(
+      /repeated cursor/i,
+    );
+  });
+
+  it("caps tools/list pagination before a unique-cursor loop can grow", { timeout: 8_000 }, async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-pager-"));
+    const server = await writePagerServer(root, "increment");
+    await expect(inspectBundleServer(bundlePlugin(root), server, 10_000)).rejects.toThrow(
+      /50 pages/i,
+    );
+  });
+
+  it("shares one deadline across tools/list pages", { timeout: 8_000 }, async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-pager-"));
+    const server = await writePagerServer(root, "slow-increment");
+    await expect(inspectBundleServer(bundlePlugin(root), server, 100)).rejects.toThrow(
+      /timed out/i,
+    );
   });
 });
