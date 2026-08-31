@@ -5,11 +5,29 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+export const GIT_CLONE_TIMEOUT_MS = 120_000;
+
+export function resolveCloneTimeoutMs(options: {
+  cliValue?: string;
+  envValue?: string;
+} = {}): number {
+  const raw = options.cliValue ?? options.envValue;
+  if (raw === undefined) {
+    return GIT_CLONE_TIMEOUT_MS;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || String(parsed) !== raw.trim()) {
+    throw new Error("clone timeout must be a positive integer number of milliseconds");
+  }
+  return parsed;
+}
+
 export type InstallPluginParams = {
   installDir: string;
   source: string;
   name?: string;
   force?: boolean;
+  timeoutMs?: number;
   validate?: (target: string) => Promise<void>;
   afterChange?: () => Promise<void>;
 };
@@ -65,6 +83,7 @@ export async function installPlugin({
   source,
   name,
   force = false,
+  timeoutMs = GIT_CLONE_TIMEOUT_MS,
   validate,
   afterChange,
 }: InstallPluginParams): Promise<{ name: string; path: string }> {
@@ -91,6 +110,7 @@ export async function installPlugin({
   try {
     await execFileAsync("git", ["clone", "--depth", "1", source, staged], {
       maxBuffer: 1024 * 1024,
+      timeout: timeoutMs,
     });
     await validate?.(staged);
     if (replacing) {

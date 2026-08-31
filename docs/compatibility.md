@@ -75,6 +75,8 @@ openclaw babelfish install codex https://github.com/Kotlin/kotlin-agent-skills.g
 openclaw babelfish install hermes https://github.com/robbyczgw-cla/hermes-web-search-plus.git
 ```
 
+`babelfish install` times out a hung `git clone` after 120 seconds. Pass `--clone-timeout-ms <ms>` or set `OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS` when a healthy clone needs longer.
+
 Restart OpenClaw after installing or removing a plugin. OpenClaw plugin metadata and tool contracts are process-stable, so Babelfish generates contracts for the next load.
 
 ## Optional MCP compatibility mode

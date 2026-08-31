@@ -1,12 +1,15 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
+  GIT_CLONE_TIMEOUT_MS,
   installHermesPlugin,
   installPlugin,
   repoNameFromSource,
+  resolveCloneTimeoutMs,
   sanitizePluginName,
   uninstallHermesPlugin,
 } from "./git-install.js";
@@ -20,6 +23,27 @@ describe("sanitizePluginName", () => {
 
   it("rejects traversal", () => {
     expect(() => sanitizePluginName("../bad")).toThrow(/letters/);
+  });
+});
+
+describe("resolveCloneTimeoutMs", () => {
+  it("defaults to 120 seconds", () => {
+    expect(resolveCloneTimeoutMs()).toBe(GIT_CLONE_TIMEOUT_MS);
+  });
+
+  it("prefers the CLI value over the environment", () => {
+    expect(resolveCloneTimeoutMs({ cliValue: "45000", envValue: "90000" })).toBe(45_000);
+  });
+
+  it("uses the environment when the CLI omits the flag", () => {
+    expect(resolveCloneTimeoutMs({ envValue: "90000" })).toBe(90_000);
+  });
+
+  it("rejects non-positive and non-integer values", () => {
+    expect(() => resolveCloneTimeoutMs({ cliValue: "0" })).toThrow(/positive integer/);
+    expect(() => resolveCloneTimeoutMs({ cliValue: "-1" })).toThrow(/positive integer/);
+    expect(() => resolveCloneTimeoutMs({ cliValue: "1.5" })).toThrow(/positive integer/);
+    expect(() => resolveCloneTimeoutMs({ envValue: "fast" })).toThrow(/positive integer/);
   });
 });
 
@@ -151,5 +175,36 @@ describe("installHermesPlugin", () => {
       }),
     ).rejects.toThrow("regeneration failed");
     await expect(fs.readFile(path.join(target, "marker"), "utf8")).resolves.toBe("kept");
+  });
+
+  it("times out a hung git clone instead of waiting forever", { timeout: 8_000 }, async () => {
+    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-install-"));
+    const sockets: net.Socket[] = [];
+    const server = net.createServer((socket) => {
+      sockets.push(socket);
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const { port } = server.address() as net.AddressInfo;
+    const started = Date.now();
+    try {
+      await expect(
+        installPlugin({
+          installDir,
+          source: `http://127.0.0.1:${port}/stalled-plugin.git`,
+          name: "stalled",
+          timeoutMs: 400,
+        }),
+      ).rejects.toMatchObject({ killed: true, signal: "SIGTERM" });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      for (const socket of sockets) {
+        socket.destroy();
+      }
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   });
 });
