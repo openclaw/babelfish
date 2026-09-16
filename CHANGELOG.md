@@ -2,12 +2,13 @@
 
 ## 0.1.1 (Unreleased)
 
-- Prevent early command-hook exits from crashing the host with a broken stdin pipe, preserving successful output and blocking exit decisions.
+- Preserve Markdown frontmatter in imported skills, commands, and output styles with Windows line endings or a closing delimiter at end of file.
 - Refresh the MCP SDK, development dependencies, npm 11 tooling, and pinned CodeQL actions while retaining Node.js 22.19 support.
 - Bound imported command-hook stdout and stderr so noisy hooks cannot exhaust
   OpenClaw memory before their timeout.
 - Add a Docker constrained-memory matrix covering build, tests, packaging,
   three-app plugin lifecycle, generated tools, and MCP stdio down to 256 MiB.
+- Prevent early command-hook exits from crashing the host with a broken stdin pipe, preserving successful output and blocking exit decisions.
 
 ## 0.1.0 — 2026-07-27
 
