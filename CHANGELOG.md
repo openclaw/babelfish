@@ -3,6 +3,7 @@
 ## 0.1.1 (Unreleased)
 
 - Avoid leaving staging directories behind when a duplicate plugin install is rejected without `--force`.
+- Preserve Markdown frontmatter in imported skills, commands, and output styles with Windows line endings or a closing delimiter at end of file.
 - Refresh the MCP SDK, development dependencies, npm 11 tooling, and pinned CodeQL actions while retaining Node.js 22.19 support.
 - Bound imported command-hook stdout and stderr so noisy hooks cannot exhaust
   OpenClaw memory before their timeout.

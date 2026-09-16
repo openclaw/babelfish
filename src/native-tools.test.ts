@@ -418,18 +418,18 @@ await server.connect(new StdioServerTransport());
     );
   });
 
-  it("qualifies copied skills and imports nested command markdown", async () => {
+  it.each(["\n", "\r\n"])("preserves skill and command frontmatter with %j line endings", async (eol) => {
     const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-bundle-state-"));
     const plugin = path.join(stateRoot, "claude-code", "fixture");
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-package-"));
     await fs.mkdir(path.join(plugin, ".claude-plugin"), { recursive: true });
     await fs.writeFile(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "fixture" }));
     await fs.mkdir(path.join(plugin, "skills", "review"), { recursive: true });
-    await fs.writeFile(path.join(plugin, "skills", "review", "SKILL.md"), "---\nname: review\ndescription: review\n---\n");
+    await fs.writeFile(path.join(plugin, "skills", "review", "SKILL.md"), ["---", "name: review", "description: review", "allowed-tools: Read", "---"].join(eol));
     await fs.mkdir(path.join(plugin, "commands", "git"), { recursive: true });
     await fs.writeFile(
       path.join(plugin, "commands", "git", "commit.md"),
-      "---\ndescription: Commit selected files\nargument-hint: '[files]'\nallowed-tools: Bash(git status *)\n---\nCommit $ARGUMENTS.",
+      ["---", "description: Commit selected files", "argument-hint: '[files]'", "allowed-tools: Bash(git status *)", "---", "Commit $ARGUMENTS."].join(eol),
     );
     await fs.mkdir(path.join(root, "skills"));
     await fs.writeFile(path.join(root, "openclaw.plugin.json"), JSON.stringify({ id: "babelfish", contracts: {} }));
@@ -438,7 +438,7 @@ await server.connect(new StdioServerTransport());
       { root },
     );
     await expect(fs.readFile(path.join(root, "skills", "babelfish-bundles", "claude-code-fixture-review", "SKILL.md"), "utf8"))
-      .resolves.toContain("name: claude-code-fixture-review");
+      .resolves.toBe("---\nname: claude-code-fixture-review\ndescription: review\nallowed-tools: Read\n---\n");
     await expect(fs.readFile(path.join(root, "skills", "babelfish-bundles", "claude-code-fixture-git-commit", "SKILL.md"), "utf8"))
       .resolves.toMatch(/description: "Commit selected files"[\s\S]*argument-hint: '\[files\]'[\s\S]*allowed-tools: Bash\(git status \*\)[\s\S]*disable-model-invocation: true[\s\S]*Commit \$ARGUMENTS\./);
   });

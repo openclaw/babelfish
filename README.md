@@ -41,7 +41,7 @@ Installing an already installed name requires `--force`; a rejected duplicate le
 | Source contribution | OpenClaw behavior |
 | --- | --- |
 | Agent and MCP tools | Native tools that retain the source JSON schema |
-| Skills and support files | Native OpenClaw skills with referenced files intact |
+| Skills and support files | Native OpenClaw skills with referenced files intact; Markdown frontmatter supports LF and Windows CRLF line endings |
 | Prompt and terminal commands | User-invoked skills or top-level CLI commands when the source format supports them |
 | Compatible hooks | Matching lifecycle, prompt, tool, compaction, and subagent hooks |
 | Compatible middleware | Matching prompt-build and tool-result middleware |
