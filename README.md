@@ -43,15 +43,17 @@ Installing an already installed name requires `--force`; a rejected duplicate le
 | Agent and MCP tools | Native tools that retain the source JSON schema |
 | Skills and support files | Native OpenClaw skills with referenced files intact; Markdown frontmatter supports LF and Windows CRLF line endings |
 | Prompt and terminal commands | User-invoked skills or top-level CLI commands when the source format supports them |
-| Compatible hooks | Matching lifecycle, prompt, tool, compaction, and subagent hooks |
+| Compatible hooks | Matching lifecycle, prompt, tool, compaction, and subagent hooks. String commands use a login shell; `args` or a `command` array spawn without a shell. |
 | Compatible middleware | Matching prompt-build and tool-result middleware |
 | Unsupported behavior | Recorded during generation and reported at Gateway startup |
 
 Support differs by source app and surface. See the [compatibility reference](docs/compatibility.md) for the full matrix, source-specific behavior, configuration, and example plugins.
 
+Command-hook results, including blocking exit decisions, are retained when a hook exits without reading all stdin.
+
 ## Trust and lifecycle
 
-Installing a plugin executes code from its repository while Babelfish inspects MCP tools and later runs imported hooks or tools. Review the source before installing it.
+Installing a plugin executes code from its repository while Babelfish inspects MCP tools and later runs imported hooks or tools. Review the source before installing it. String hook commands are full shell execution. Hooks that declare `args` or a `command` array spawn the listed executable directly.
 
 Babelfish does not expose install or uninstall as agent tools. The read-only `babelfish_plugins_list` agent tool reports installed plugins and detected surfaces. Restart OpenClaw after installing, updating, or removing an imported plugin because OpenClaw loads plugin metadata and tool contracts at process startup.
 

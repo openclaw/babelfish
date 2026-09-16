@@ -3,8 +3,11 @@ param(
   [ValidateSet("command", "monitor")]
   [string]$Mode,
 
-  [Parameter(Mandatory = $true)]
-  [string]$CommandBase64
+  [Parameter(Mandatory = $true, ParameterSetName = "Command")]
+  [string]$CommandBase64,
+
+  [Parameter(Mandatory = $true, ParameterSetName = "Argv")]
+  [string]$ArgvBase64
 )
 
 $ErrorActionPreference = "Stop"
@@ -427,7 +430,37 @@ public static class BabelfishJob {
         }
     }
 
+    private static string QuoteArgument(string argument) {
+        var quoted = new StringBuilder("\"");
+        int backslashes = 0;
+        foreach (char character in argument) {
+            if (character == '\\') {
+                backslashes++;
+                continue;
+            }
+            quoted.Append('\\', character == '"' ? backslashes * 2 + 1 : backslashes);
+            quoted.Append(character);
+            backslashes = 0;
+        }
+        quoted.Append('\\', backslashes * 2);
+        return quoted.Append('"').ToString();
+    }
+
+    public static int RunArgv(string executable, string[] arguments, string mode) {
+        var commandLine = new StringBuilder(QuoteArgument(executable));
+        foreach (string argument in arguments) {
+            commandLine.Append(' ').Append(QuoteArgument(argument));
+        }
+        return RunProcess(executable, commandLine, mode);
+    }
+
     public static int Run(string command, string mode, string commandShell) {
+        return RunProcess(commandShell, new StringBuilder(
+            "\"" + commandShell + "\" /d /s /c \"" + command + "\""
+        ), mode);
+    }
+
+    private static int RunProcess(string executable, StringBuilder commandLine, string mode) {
         IntPtr job = CreateKillOnCloseJob();
         IntPtr childStdin;
         IntPtr parentStdin;
@@ -439,13 +472,10 @@ public static class BabelfishJob {
         CreateChildOutputPipe(out parentStdout, out childStdout);
         CreateChildOutputPipe(out parentStderr, out childStderr);
 
-        var commandLine = new StringBuilder(
-            "\"" + commandShell + "\" /d /s /c \"" + command + "\""
-        );
         PROCESS_INFORMATION child;
         try {
             child = CreateProcessInJob(
-                commandShell,
+                executable,
                 commandLine,
                 job,
                 childStdin,
@@ -509,6 +539,15 @@ public static class BabelfishJob {
     }
 }
 "@
+
+if ($PSCmdlet.ParameterSetName -eq "Argv") {
+  $argvJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ArgvBase64))
+  # Windows PowerShell returns the JSON array as one pipeline object.
+  [string[]]$commandArgv = ConvertFrom-Json -InputObject $argvJson
+  $executable = (Get-Command -Name $commandArgv[0] -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+  [string[]]$arguments = @($commandArgv | Select-Object -Skip 1)
+  exit [BabelfishJob]::RunArgv($executable, $arguments, $Mode)
+}
 
 $command = [Text.Encoding]::UTF8.GetString(
   [Convert]::FromBase64String($CommandBase64)

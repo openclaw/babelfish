@@ -16,6 +16,7 @@ Babelfish translates plugin behavior from Claude Code, Codex, and Hermes Agent i
 | User prompt commands | Full | N/A | Partial | Hermes commands become native slash commands; Claude commands become user-only skills |
 | Terminal CLI commands | Full | N/A | N/A | Registered as top-level `openclaw <command>` commands |
 | Command-hook process output | N/A | 1 MiB per stream | 1 MiB per stream | Codex and Claude Code command hooks are terminated and reported as failed if stdout or stderr exceeds the limit |
+| Command-hook invocation | N/A | String shell or exec `args` | String shell or exec `args` | String `command` runs via `/bin/sh -lc` (Windows uses `cmd.exe`). `args` or a `command` array spawn the executable without shell parsing. Both forms retain Windows Job supervision and process-tree cleanup. Plugin install is trusted code execution. |
 | Plugin-defined agents | N/A | N/A | Partial | Imported as user-only skills; model and tool isolation are not preserved |
 | Pre-tool command hooks | Full | Full | Full | Blocks and argument rewrites map to OpenClaw's pre-tool hook |
 | Permission command hooks | N/A | No | No | OpenClaw has no equivalent approval-boundary event |
@@ -42,7 +43,7 @@ Babelfish translates plugin behavior from Claude Code, Codex, and Hermes Agent i
 
 Babelfish reads `.claude-plugin/plugin.json`, declared or conventional skill, command, agent, output-style, hook, and MCP paths. Existing `SKILL.md` directories are copied intact. Markdown commands, agents, and output styles are converted to user-invoked OpenClaw skills.
 
-Command hooks run with `${CLAUDE_PLUGIN_ROOT}` set to the installed plugin directory. `command` handlers are supported. Single-turn `prompt` handlers use the active OpenClaw agent and model when `plugins.entries.babelfish.llm` allows both agent and model overrides. Without those trust flags they are reported but not executed. Multi-turn `agent` handlers are unsupported.
+Command hooks run with `${CLAUDE_PLUGIN_ROOT}` set to the installed plugin directory. String `command` handlers run through a login shell. When `args` is set (Claude Code exec form), or when `command` is a string array, Babelfish spawns the executable directly without a shell. Single-turn `prompt` handlers use the active OpenClaw agent and model when `plugins.entries.babelfish.llm` allows both agent and model overrides. Without those trust flags they are reported but not executed. Multi-turn `agent` handlers are unsupported.
 
 ## Codex
 

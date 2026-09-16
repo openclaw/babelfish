@@ -41,6 +41,52 @@ describe("bundle plugins", () => {
     expect(plugin.hooks).toMatchObject([{ event: "SessionStart", command: "node hook.mjs" }]);
   });
 
+  it("discovers exec-form command hooks from args and command arrays", async () => {
+    const root = await fixture("claude-code");
+    await fs.writeFile(
+      path.join(root, "hooks", "hooks.json"),
+      JSON.stringify({
+        hooks: {
+          SessionStart: [{ hooks: [{ type: "command", command: "node", args: ["hook.mjs"] }] }],
+          SessionEnd: [{ hooks: [{ type: "command", command: ["node", "hook.mjs", "done"] }] }],
+        },
+      }),
+    );
+    const plugin = await inspectBundlePlugin("claude-code", root);
+    expect(plugin.hooks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ event: "SessionStart", command: "node", args: ["hook.mjs"] }),
+      expect.objectContaining({ event: "SessionEnd", command: "node", args: ["hook.mjs", "done"] }),
+    ]));
+  });
+
+  it("executes argv command hooks without a shell", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const pluginRoot = path.join(rootDir, "codex", "fixture");
+    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    await fs.writeFile(
+      path.join(pluginRoot, "argv-hook.mjs"),
+      "process.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify({hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:process.argv.slice(2).join('\\0')}})));",
+    );
+    await fs.writeFile(
+      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+      JSON.stringify({
+        hooks: {
+          SessionStart: [{ hooks: [{
+            type: "command",
+            command: "node",
+            args: ["${PLUGIN_ROOT}/argv-hook.mjs", "$(echo INJECTED)"],
+          }] }],
+        },
+      }),
+    );
+    const results = await invokeBundleHooks(
+      { rootDir, installDir: path.join(rootDir, "hermes"), python: "python3", timeoutMs: fixtureTimeoutMs, env: {} },
+      "SessionStart",
+      {},
+    );
+    expect(results.map(hookAdditionalContext)).toEqual(["$(echo INJECTED)"]);
+  }, 30_000);
+
   it("executes compatible command hooks", async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
     const plugin = await fixture("codex");
@@ -90,6 +136,33 @@ describe("bundle plugins", () => {
     expect(hookBlock({ decision: "block", reason: "no" })).toEqual({ block: true, reason: "no" });
     expect(hookUpdatedInput({ hookSpecificOutput: { updatedInput: { value: 2 } } })).toEqual({ value: 2 });
   });
+
+  it.each([0, 2])("preserves exit %s when a hook closes stdin early", async (code) => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-early-exit-"));
+    const plugin = path.join(rootDir, "codex", "fixture");
+    try {
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "node hook.mjs" }] }] },
+      }));
+      await fs.writeFile(path.join(plugin, "hook.mjs"), `
+import fs from "node:fs";
+fs.closeSync(0);
+console.log(JSON.stringify({ systemMessage: "ready" }));
+console.error("denied");
+process.exitCode = ${code};
+`);
+      const results = await invokeBundleHooks({
+        rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
+        timeoutMs: fixtureTimeoutMs, env: {},
+      }, "PreToolUse", { tool_input: { text: "x".repeat(2 * 1024 * 1024) } });
+      expect(results).toEqual(code === 0
+        ? [{ systemMessage: "ready" }]
+        : [{ decision: "block", reason: "denied" }]);
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it("passes each pre-tool rewrite to subsequent hooks", async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
@@ -305,5 +378,5 @@ describe("bundle plugins", () => {
       { decision: "block", reason: "Blocked by fixture Stop hook" },
     ]);
     await expect(invokeBundleHooks(config, "SessionEnd", {})).resolves.toEqual([]);
-  });
+  }, 30_000); // Four Windows supervisor launches can exceed Vitest's default deadline.
 });

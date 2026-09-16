@@ -22,6 +22,83 @@ describe("spawnShellCommand", () => {
     );
   });
 
+  it("spawns argv commands without a POSIX login shell", () => {
+    const child = {} as ChildProcess;
+    const spawn = vi.fn(() => child);
+
+    expect(
+      spawnShellCommand(["node", "hook.mjs", "safe; echo pwned"], { cwd: "/tmp" }, "linux", spawn),
+    ).toBe(child);
+    expect(spawn).toHaveBeenCalledWith(
+      "node",
+      ["hook.mjs", "safe; echo pwned"],
+      { cwd: "/tmp" },
+    );
+    expect(spawn.mock.calls[0]?.[1]).not.toContain("-lc");
+  });
+
+  it("keeps Windows argv commands inside the Job supervisor", () => {
+    const child = {} as ChildProcess;
+    const spawn = vi.fn(() => child);
+
+    expect(
+      spawnShellCommand(["node", "hook.mjs"], { cwd: "C:\\work" }, "win32", spawn),
+    ).toBe(child);
+    const [executable, args, options] = spawn.mock.calls[0]!;
+    expect(executable).toMatch(/powershell\.exe$/);
+    expect(args).toContain("-ArgvBase64");
+    expect(JSON.parse(Buffer.from(args.at(-1)!, "base64").toString("utf8")))
+      .toEqual(["node", "hook.mjs"]);
+    expect(options).toEqual({ cwd: "C:\\work", detached: false, windowsHide: true });
+  });
+
+  it("rejects an empty argv command", () => {
+    const spawn = vi.fn();
+    expect(() => spawnShellCommand([], { cwd: "/tmp" }, "linux", spawn)).toThrow(/empty/i);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("preserves literal argv through the platform launcher", async () => {
+    const args = ["", "two words", "a\"b", "back\\slash\\", "trail space\\", "$(echo changed)", "%PATH%", "x & y", "日本語"];
+    const child = spawnShellCommand(
+      [process.execPath, "-e", "process.stdout.write(JSON.stringify(process.argv.slice(1)))", ...args],
+      { detached: true, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout!.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr!.on("data", (chunk: Buffer) => stderr.push(chunk));
+    const [code] = await once(child, "close");
+    expect(Buffer.concat(stderr).toString("utf8")).toBe("");
+    expect(code).toBe(0);
+    expect(JSON.parse(Buffer.concat(stdout).toString("utf8"))).toEqual(args);
+  }, 15_000);
+
+  it("terminates argv command descendants with their supervisor", async () => {
+    const child = spawnShellCommand([
+      process.execPath, "-e",
+      "const {spawn}=require('node:child_process'); const worker=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log(worker.pid); setInterval(()=>{},1000);",
+    ], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    let workerPid: number | undefined;
+    const closed = once(child, "close");
+    try {
+      let stdout = "";
+      child.stdout!.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+      await vi.waitFor(() => expect(stdout).toMatch(/^\d+\s/), { timeout: 10_000 });
+      workerPid = Number(stdout.trim());
+      terminateShellProcessTree(child);
+      await closed;
+      await vi.waitFor(() => {
+        expect(() => process.kill(workerPid!, 0)).toThrow();
+      }, { timeout: 5_000 });
+    } finally {
+      terminateShellProcessTree(child, process.platform, "SIGKILL");
+      if (workerPid) {
+        try { process.kill(workerPid, "SIGKILL"); } catch { /* Already exited. */ }
+      }
+    }
+  }, 20_000);
+
   it("delegates Windows command parsing to the native shell", () => {
     const child = new EventEmitter() as ChildProcess;
     const spawn = vi.fn(() => child);
