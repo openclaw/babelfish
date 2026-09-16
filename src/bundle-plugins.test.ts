@@ -152,12 +152,12 @@ describe("bundle plugins", () => {
     expect(plugin.servers.map((server) => server.name)).toEqual(["inline"]);
   });
 
-  it("discovers Claude output styles", async () => {
+  it.each(["\n", "\r\n"])("discovers Claude output styles with %j line endings", async (eol) => {
     const root = await fixture("claude-code");
     await fs.mkdir(path.join(root, "output-styles"));
     await fs.writeFile(
       path.join(root, "output-styles", "brief.md"),
-      "---\nname: Brief\ndescription: Keep replies short\nkeep-coding-instructions: true\n---\nAnswer in three sentences.",
+      ["---", "name: Brief", "description: Keep replies short", "keep-coding-instructions: true", "---", "Answer in three sentences."].join(eol),
     );
     const plugin = await inspectBundlePlugin("claude-code", root);
     expect(plugin.outputStyles).toEqual([{

@@ -20,6 +20,7 @@ import {
   type HermesToolSummary,
 } from "./hermes-python.js";
 import { syncHermesSkills } from "./skill-sync.js";
+import { splitFrontmatter } from "./markdown.js";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const generatedRegistryFile = "babelfish.generated.json";
@@ -403,19 +404,17 @@ function convertedSkillMarkdown(name: string, source: string): string {
   let body = source;
   let description = `Imported plugin command ${name}`;
   let preserved: string[] = [];
-  if (source.startsWith("---\n")) {
-    const end = source.indexOf("\n---\n", 4);
-    if (end >= 0) {
-      const frontmatter = source.slice(4, end);
-      const match = frontmatter.match(/^description:\s*(.+)$/m);
-      if (match?.[1]) {
-        description = match[1].trim().replace(/^['"]|['"]$/g, "");
-      }
-      preserved = frontmatter
-        .split("\n")
-        .filter((line) => !/^(name|description|disable-model-invocation):/i.test(line));
-      body = source.slice(end + 5);
+  const parsed = splitFrontmatter(source);
+  if (parsed) {
+    const { frontmatter } = parsed;
+    const match = frontmatter.match(/^description:\s*(.+)$/m);
+    if (match?.[1]) {
+      description = match[1].trim().replace(/^['"]|['"]$/g, "");
     }
+    preserved = frontmatter
+      .split("\n")
+      .filter((line) => !/^(name|description|disable-model-invocation):/i.test(line));
+    body = parsed.body;
   }
   return [
     "---",
@@ -431,18 +430,15 @@ function convertedSkillMarkdown(name: string, source: string): string {
 }
 
 function renamedSkillMarkdown(name: string, source: string): string {
-  if (!source.startsWith("---\n")) {
+  const parsed = splitFrontmatter(source);
+  if (!parsed) {
     return convertedSkillMarkdown(name, source);
   }
-  const end = source.indexOf("\n---\n", 4);
-  if (end < 0) {
-    return convertedSkillMarkdown(name, source);
-  }
-  const frontmatter = source.slice(4, end);
+  const { frontmatter } = parsed;
   const renamed = /^name:/m.test(frontmatter)
     ? frontmatter.replace(/^name:.*$/m, `name: ${name}`)
     : `name: ${name}\n${frontmatter}`;
-  return `---\n${renamed}\n---\n${source.slice(end + 5)}`;
+  return `---\n${renamed}\n---\n${parsed.body}`;
 }
 
 async function copySkillDirectory(source: string, target: string, name: string): Promise<void> {
