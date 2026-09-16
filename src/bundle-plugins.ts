@@ -849,6 +849,12 @@ function runHookCommand(
     }, timeoutMs);
     child.stdout!.on("data", (chunk: Buffer) => capture("stdout", stdout, chunk));
     child.stderr!.on("data", (chunk: Buffer) => capture("stderr", stderr, chunk));
+    child.stdin!.on("error", (error: NodeJS.ErrnoException) => {
+      // Hooks can return a decision without consuming all of their input.
+      if (error.code === "EPIPE" || error.code === "ECONNRESET") return;
+      terminate();
+      finish(error);
+    });
     child.on("error", (error) => finish(error));
     child.on("close", (code) => {
       if (code === 0) {

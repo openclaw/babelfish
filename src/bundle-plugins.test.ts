@@ -91,6 +91,33 @@ describe("bundle plugins", () => {
     expect(hookUpdatedInput({ hookSpecificOutput: { updatedInput: { value: 2 } } })).toEqual({ value: 2 });
   });
 
+  it.each([0, 2])("preserves exit %s when a hook closes stdin early", async (code) => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-early-exit-"));
+    const plugin = path.join(rootDir, "codex", "fixture");
+    try {
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: { PreToolUse: [{ hooks: [{ type: "command", command: "node hook.mjs" }] }] },
+      }));
+      await fs.writeFile(path.join(plugin, "hook.mjs"), `
+import fs from "node:fs";
+fs.closeSync(0);
+console.log(JSON.stringify({ systemMessage: "ready" }));
+console.error("denied");
+process.exitCode = ${code};
+`);
+      const results = await invokeBundleHooks({
+        rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
+        timeoutMs: fixtureTimeoutMs, env: {},
+      }, "PreToolUse", { tool_input: { text: "x".repeat(2 * 1024 * 1024) } });
+      expect(results).toEqual(code === 0
+        ? [{ systemMessage: "ready" }]
+        : [{ decision: "block", reason: "denied" }]);
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("passes each pre-tool rewrite to subsequent hooks", async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
     const pluginRoot = path.join(rootDir, "codex", "fixture");
