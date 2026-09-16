@@ -36,6 +36,8 @@ Restart OpenClaw again to load the generated contracts and skills. Supported app
 
 Babelfish preserves source names when they are unique and qualifies collisions with the plugin name. Install and uninstall operations regenerate the OpenClaw plugin manifest, tool registry, and imported skill directories.
 
+Installing an already installed name requires `--force`; a rejected duplicate leaves the existing plugin intact and creates no staging directory.
+
 | Source contribution | OpenClaw behavior |
 | --- | --- |
 | Agent and MCP tools | Native tools that retain the source JSON schema |

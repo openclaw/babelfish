@@ -74,19 +74,16 @@ export async function installPlugin({
 
   const pluginName = sanitizePluginName(name ?? repoNameFromSource(source));
   const target = path.join(installDir, pluginName);
+  const replacing = await pathExists(target);
+  if (replacing && !force) {
+    throw new Error(`Plugin '${pluginName}' already exists. Pass force=true to reinstall.`);
+  }
   const nonce = `${process.pid}.${Date.now()}`;
   const stagingRoot = path.join(installDir, ".babelfish-staging", `${pluginName}.${nonce}`);
   const staged = path.join(stagingRoot, "new");
   const backup = path.join(stagingRoot, "old");
   await fs.mkdir(installDir, { recursive: true });
   await fs.mkdir(stagingRoot, { recursive: true });
-
-  const replacing = await pathExists(target);
-  if (replacing) {
-    if (!force) {
-      throw new Error(`Plugin '${pluginName}' already exists. Pass force=true to reinstall.`);
-    }
-  }
 
   try {
     await execFileAsync("git", ["clone", "--depth", "1", source, staged], {

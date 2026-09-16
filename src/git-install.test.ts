@@ -31,6 +31,22 @@ describe("repoNameFromSource", () => {
 });
 
 describe("installHermesPlugin", () => {
+  it("rejects a duplicate install without leaving staging directories", async () => {
+    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-duplicate-"));
+    try {
+      const target = path.join(installDir, "existing");
+      await fs.mkdir(target);
+      await fs.writeFile(path.join(target, "marker"), "kept");
+      await expect(installPlugin({
+        installDir, source: "unused", name: "existing",
+      })).rejects.toThrow("already exists");
+      expect(await fs.readdir(installDir)).toEqual(["existing"]);
+      expect(await fs.readFile(path.join(target, "marker"), "utf8")).toBe("kept");
+    } finally {
+      await fs.rm(installDir, { recursive: true, force: true });
+    }
+  });
+
   it("installs a bundle validated by its caller", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-install-"));
     const installDir = path.join(root, "installed");
