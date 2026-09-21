@@ -7,7 +7,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "declaration": true,
-    "sourceMap": true,
+    "emitDeclarationOnly": true,
     "outDir": "dist",
     "rootDir": "src",
     "types": ["node", "vitest/globals"]

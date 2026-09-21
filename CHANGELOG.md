@@ -11,6 +11,7 @@
 - Add a Docker constrained-memory matrix covering build, tests, packaging,
   three-app plugin lifecycle, generated tools, and MCP stdio down to 256 MiB.
 - Prevent early command-hook exits from crashing the host with a broken stdin pipe, preserving successful output and blocking exit decisions.
+- Reduce npm package size by omitting duplicate JavaScript modules and stale source maps while preserving bundled entrypoints, type declarations, and runtime assets.
 
 ## 0.1.0 — 2026-07-27
 

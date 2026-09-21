@@ -56,6 +56,15 @@ if (missing.length > 0) {
   throw new Error(`Package is missing required files: ${missing.join(", ")}`);
 }
 
+// esbuild owns runtime JavaScript; TypeScript emits only the declarations.
+const unexpected = [...files].filter((file) =>
+  file.startsWith("dist/") && !file.endsWith(".d.ts") &&
+  file !== "dist/index.js" && file !== "dist/bin.js",
+);
+if (unexpected.length > 0) {
+  throw new Error(`Package contains unexpected build output: ${unexpected.join(", ")}`);
+}
+
 const entrypoint = await import(new URL(`../${packageJson.main}`, import.meta.url));
 if (typeof entrypoint.default?.register !== "function") {
   throw new Error("Package entrypoint does not export the Babelfish plugin");
