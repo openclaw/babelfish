@@ -6,6 +6,8 @@ Babelfish translates plugin behavior from Claude Code, Codex, and Hermes Agent i
 
 **Full** means the source behavior has a direct native mapping. **Partial** means the useful behavior works with the listed semantic gaps. **No** means the surface is detected or documented but not executed. **N/A** means the source format does not provide that surface.
 
+Bundle paths must stay inside the plugin root, including after resolving skill-root symlinks. Names beginning with two dots (for example, `..skills`) are ordinary directory names; parent-directory traversal (`..` or `../outside`) remains rejected.
+
 | Plugin surface | Hermes Agent | Codex | Claude Code | OpenClaw mapping or limitation |
 | --- | --- | --- | --- | --- |
 | Manifest metadata | Full | Full | Full | Used for discovery, names, versions, and descriptions |

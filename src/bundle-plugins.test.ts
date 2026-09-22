@@ -34,6 +34,29 @@ async function fixture(app: "claude-code" | "codex") {
 }
 
 describe("bundle plugins", () => {
+  it.each(["claude-code", "codex"] as const)("accepts %s skill directories beginning with two dots", async (app) => {
+    const root = await fixture(app);
+    try {
+      await fs.rename(path.join(root, "skills"), path.join(root, "..skills"));
+      const manifestDir = app === "codex" ? ".codex-plugin" : ".claude-plugin";
+      await fs.writeFile(path.join(root, manifestDir, "plugin.json"), JSON.stringify({ skills: "./..skills" }));
+      const plugin = await inspectBundlePlugin(app, root);
+      expect(plugin.skillDirs).toEqual([await fs.realpath(path.join(root, "..skills"))]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["..", "../outside"])("rejects a skill root outside the plugin: %s", async (skills) => {
+    const root = await fixture("codex");
+    try {
+      await fs.writeFile(path.join(root, ".codex-plugin", "plugin.json"), JSON.stringify({ skills }));
+      await expect(inspectBundlePlugin("codex", root)).rejects.toThrow("Plugin path escapes its root");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it.each(["claude-code", "codex"] as const)("discovers %s skills and command hooks", async (app) => {
     const root = await fixture(app);
     const plugin = await inspectBundlePlugin(app, root);

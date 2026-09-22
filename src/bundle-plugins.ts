@@ -177,7 +177,7 @@ async function readMonitors(root: string, manifest: JsonObject): Promise<{ monit
 function underRoot(root: string, value: string): string {
   const resolved = path.resolve(root, value);
   const relative = path.relative(root, resolved);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error(`Plugin path escapes its root: ${value}`);
   }
   return resolved;
@@ -192,7 +192,7 @@ async function existingPaths(root: string, paths: string[]): Promise<string[]> {
     try {
       const real = await fs.realpath(resolved);
       const relative = path.relative(realRoot, real);
-      if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
         throw new Error(`Plugin path escapes its root through a symlink: ${candidate}`);
       }
       if (!seen.has(real)) {
