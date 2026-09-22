@@ -4,11 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
-  installHermesPlugin,
   installPlugin,
   repoNameFromSource,
   sanitizePluginName,
-  uninstallHermesPlugin,
+  uninstallPlugin,
+  validateHermesPluginDirectory,
 } from "./git-install.js";
 
 const execFileAsync = promisify(execFile);
@@ -30,7 +30,7 @@ describe("repoNameFromSource", () => {
   });
 });
 
-describe("installHermesPlugin", () => {
+describe("plugin lifecycle", () => {
   it("rejects a duplicate install without leaving staging directories", async () => {
     const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-duplicate-"));
     try {
@@ -70,7 +70,7 @@ describe("installHermesPlugin", () => {
     await fs.writeFile(path.join(target, "marker"), "kept");
 
     await expect(
-      installHermesPlugin({
+      installPlugin({
         installDir,
         source: path.join(installDir, "missing"),
         name: "existing",
@@ -108,7 +108,7 @@ describe("installHermesPlugin", () => {
     ]);
 
     await expect(
-      installHermesPlugin({ installDir, source, name: "existing", force: true }),
+      installPlugin({ installDir, source, name: "existing", force: true, validate: validateHermesPluginDirectory }),
     ).rejects.toThrow("not a supported plugin");
     await expect(fs.readFile(path.join(target, "marker"), "utf8")).resolves.toBe("kept");
   });
@@ -138,11 +138,12 @@ describe("installHermesPlugin", () => {
     ]);
 
     await expect(
-      installHermesPlugin({
+      installPlugin({
         installDir,
         source,
         name: "existing",
         force: true,
+        validate: validateHermesPluginDirectory,
         afterChange: async () => {
           throw new Error("regeneration failed");
         },
@@ -158,7 +159,7 @@ describe("installHermesPlugin", () => {
     await fs.writeFile(path.join(target, "marker"), "kept");
 
     await expect(
-      uninstallHermesPlugin({
+      uninstallPlugin({
         installDir,
         name: "existing",
         afterChange: async () => {

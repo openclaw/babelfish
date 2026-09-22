@@ -160,10 +160,3 @@ export async function uninstallPlugin({
   }
   return { name: pluginName, path: target };
 }
-
-
-export function installHermesPlugin(params: InstallPluginParams) {
-  return installPlugin({ ...params, validate: validateHermesPluginDirectory });
-}
-
-export const uninstallHermesPlugin = uninstallPlugin;
