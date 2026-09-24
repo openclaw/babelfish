@@ -62,7 +62,7 @@ Babelfish does not expose install or uninstall as agent tools. The read-only `ba
 | Command | Purpose |
 | --- | --- |
 | `openclaw babelfish list [app]` | List installed plugins and detected surfaces |
-| `openclaw babelfish install <app> <git-url> [--name <name>] [--force]` | Install a source plugin from Git |
+| `openclaw babelfish install <app> <git-url> [--name <name>] [--force] [--clone-timeout-ms <ms>]` | Install a source plugin from Git. Clone waits 120 seconds by default; pass `--clone-timeout-ms` or set `OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS` for a slower healthy remote |
 | `openclaw babelfish uninstall <app> <name>` | Remove an imported plugin |
 | `babelfish mcp` | Start the optional Hermes-only stdio MCP server |
 

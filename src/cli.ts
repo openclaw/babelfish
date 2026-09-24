@@ -1,6 +1,11 @@
 import { inspectBundlePlugin, listBundlePlugins, summarizeBundlePlugin, validateBundlePluginDirectory } from "./bundle-plugins.js";
 import { appInstallDir, resolveConfig, SUPPORTED_APPS, type SupportedApp } from "./config.js";
-import { installPlugin, uninstallPlugin, validateHermesPluginDirectory } from "./git-install.js";
+import {
+  installPlugin,
+  resolveCloneTimeoutMs,
+  uninstallPlugin,
+  validateHermesPluginDirectory,
+} from "./git-install.js";
 import { listHermesPlugins } from "./hermes-python.js";
 import { regenerateNativeTools } from "./native-tools.js";
 
@@ -13,12 +18,28 @@ function readOptionValue(args: string[], name: string): string | undefined {
   return value && !value.startsWith("--") ? value : undefined;
 }
 
+function readCloneTimeoutMs(args: string[]): number {
+  const name = "--clone-timeout-ms";
+  let last: number | undefined;
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] !== name) {
+      continue;
+    }
+    const value = args[i + 1];
+    if (!value || value.startsWith("--")) {
+      throw new Error(`${name} requires a positive integer millisecond value`);
+    }
+    last = resolveCloneTimeoutMs({ cliValue: value });
+  }
+  return last ?? resolveCloneTimeoutMs({ envValue: process.env.OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS });
+}
+
 function usage(): string {
   return [
     "Usage:",
     "  babelfish mcp",
     "  babelfish list [app]",
-    "  babelfish install <app> <source> [--name <name>] [--force]",
+    "  babelfish install <app> <source> [--name <name>] [--force] [--clone-timeout-ms <ms>]",
     "  babelfish uninstall <app> <name>",
   ].join("\n");
 }
@@ -79,6 +100,7 @@ export async function runBabelfishCli(args: string[]): Promise<void> {
       source,
       name: readOptionValue(args, "--name"),
       force: args.includes("--force"),
+      timeoutMs: readCloneTimeoutMs(args),
       validate: app === "hermes"
         ? validateHermesPluginDirectory
         : (target) => validateBundlePluginDirectory(app, target),

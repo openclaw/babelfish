@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
   installPlugin,
   repoNameFromSource,
+  resolveCloneTimeoutMs,
   sanitizePluginName,
   uninstallPlugin,
   validateHermesPluginDirectory,
@@ -23,6 +25,20 @@ describe("sanitizePluginName", () => {
   });
 });
 
+describe("resolveCloneTimeoutMs", () => {
+  it("defaults to 120 seconds and accepts operator overrides", () => {
+    expect(resolveCloneTimeoutMs()).toBe(120_000);
+    expect(resolveCloneTimeoutMs({ cliValue: "45000", envValue: "90000" })).toBe(45_000);
+    expect(resolveCloneTimeoutMs({ envValue: "90000" })).toBe(90_000);
+    expect(resolveCloneTimeoutMs({ cliValue: "2147483647" })).toBe(2_147_483_647);
+  });
+
+  it.each(["", "0", "-1", "1.5", "fast", "1e3", "2147483648", "9007199254740993"])("rejects invalid or overflowing timers: %s", (value) => {
+    expect(() => resolveCloneTimeoutMs({ cliValue: value })).toThrow(/positive integer/);
+    expect(() => resolveCloneTimeoutMs({ envValue: value })).toThrow(/positive integer/);
+  });
+});
+
 describe("repoNameFromSource", () => {
   it("derives names from URLs and Windows paths", () => {
     expect(repoNameFromSource("https://github.com/example/plugin.git")).toBe("plugin");
@@ -31,6 +47,53 @@ describe("repoNameFromSource", () => {
 });
 
 describe("plugin lifecycle", () => {
+  it.each([false, true])("cleans up a timed-out clone and preserves existing state (force=%s)", async (force) => {
+    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-timeout-"));
+    const target = path.join(installDir, "plugin");
+    const sockets: net.Socket[] = [];
+    const server = net.createServer((socket) => {
+      sockets.push(socket);
+      socket.on("error", (error: NodeJS.ErrnoException) => expect(error.code).toBe("ECONNRESET"));
+      socket.resume();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as net.AddressInfo;
+    const afterChange = vi.fn();
+    const validate = vi.fn();
+    try {
+      if (force) {
+        await fs.mkdir(target);
+        await fs.writeFile(path.join(target, "marker"), "kept");
+      }
+      await expect(installPlugin({
+        installDir, source: `http://127.0.0.1:${port}/stalled.git`,
+        name: "plugin", force, timeoutMs: process.platform === "win32" ? 10_000 : 400,
+        validate, afterChange,
+      })).rejects.toThrow(/Git clone timed out/);
+      expect(validate).not.toHaveBeenCalled();
+      expect(afterChange).not.toHaveBeenCalled();
+      expect(await fs.readdir(installDir)).toEqual(force ? ["plugin"] : []);
+      if (force) expect(await fs.readFile(path.join(target, "marker"), "utf8")).toBe("kept");
+      expect(sockets.length).toBeGreaterThan(0);
+      await vi.waitFor(() => expect(sockets.every((socket) => socket.destroyed)).toBe(true));
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      await fs.rm(installDir, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it.each([0, -1, 1.5, NaN, Infinity, 2_147_483_648])("rejects invalid programmatic timeout %s before creating staging", async (timeoutMs) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-timeout-invalid-"));
+    try {
+      await expect(installPlugin({ installDir: path.join(root, "install"), source: "unused", timeoutMs }))
+        .rejects.toThrow(/positive integer/);
+      expect(await fs.readdir(root)).toEqual([]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a duplicate install without leaving staging directories", async () => {
     const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-duplicate-"));
     try {

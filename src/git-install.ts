@@ -1,15 +1,84 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { spawnShellCommand, terminateShellProcessTree } from "./shell-command.js";
 
-const execFileAsync = promisify(execFile);
+const GIT_CLONE_TIMEOUT_MS = 120_000;
+const MAX_CLONE_OUTPUT_BYTES = 1024 * 1024;
+
+function validateCloneTimeoutMs(value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > 2_147_483_647) {
+    throw new Error("clone timeout must be a positive integer number of milliseconds (at most 2147483647)");
+  }
+  return value;
+}
+
+export function resolveCloneTimeoutMs(options: {
+  cliValue?: string;
+  envValue?: string;
+} = {}): number {
+  const raw = options.cliValue ?? options.envValue;
+  if (raw === undefined) {
+    return GIT_CLONE_TIMEOUT_MS;
+  }
+  if (!/^\d+$/.test(raw.trim())) {
+    throw new Error("clone timeout must be a positive integer number of milliseconds");
+  }
+  return validateCloneTimeoutMs(Number(raw));
+}
+
+async function cloneRepository(source: string, target: string, timeoutMs: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawnShellCommand(["git", "clone", "--depth", "1", "--", source, target], {
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let failure: Error | undefined;
+    const stderr: Buffer[] = [];
+    const stop = (error: Error) => {
+      if (failure) return;
+      failure = error;
+      // Git transports inherit the process group or Windows Job, so stop the whole tree.
+      terminateShellProcessTree(child, process.platform, "SIGKILL");
+    };
+    const timer = setTimeout(() => {
+      stop(new Error(`Git clone timed out after ${timeoutMs}ms; increase --clone-timeout-ms or OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS for a slow remote.`));
+    }, timeoutMs);
+    for (const stream of ["stdout", "stderr"] as const) {
+      let bytes = 0;
+      child[stream]!.on("data", (chunk: Buffer) => {
+        if (failure) return;
+        bytes += chunk.length;
+        if (bytes > MAX_CLONE_OUTPUT_BYTES) {
+          stop(new Error(`Git clone ${stream} exceeded the ${MAX_CLONE_OUTPUT_BYTES}-byte output limit`));
+        } else if (stream === "stderr") {
+          stderr.push(chunk);
+        }
+      });
+    }
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (code, signal) => {
+      clearTimeout(timer);
+      if (failure) {
+        reject(failure);
+      } else if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(Buffer.concat(stderr).toString("utf8").trim() || `Git clone exited with ${code ?? signal}`));
+      }
+    });
+  });
+}
 
 export type InstallPluginParams = {
   installDir: string;
   source: string;
   name?: string;
   force?: boolean;
+  timeoutMs?: number;
   validate?: (target: string) => Promise<void>;
   afterChange?: () => Promise<void>;
 };
@@ -65,6 +134,7 @@ export async function installPlugin({
   source,
   name,
   force = false,
+  timeoutMs = GIT_CLONE_TIMEOUT_MS,
   validate,
   afterChange,
 }: InstallPluginParams): Promise<{ name: string; path: string }> {
@@ -72,6 +142,7 @@ export async function installPlugin({
     throw new Error("source required");
   }
 
+  validateCloneTimeoutMs(timeoutMs);
   const pluginName = sanitizePluginName(name ?? repoNameFromSource(source));
   const target = path.join(installDir, pluginName);
   const replacing = await pathExists(target);
@@ -86,9 +157,7 @@ export async function installPlugin({
   await fs.mkdir(stagingRoot, { recursive: true });
 
   try {
-    await execFileAsync("git", ["clone", "--depth", "1", source, staged], {
-      maxBuffer: 1024 * 1024,
-    });
+    await cloneRepository(source, staged, timeoutMs);
     await validate?.(staged);
     if (replacing) {
       await fs.rename(target, backup);

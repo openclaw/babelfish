@@ -147,7 +147,7 @@ describe("Hermes Python bridge", () => {
         context: { sessionId: "session-1" },
       }),
     ).resolves.toMatchObject({ results: ["no-arg"] });
-  });
+  }, 15_000); // Allow cold Python startup on shared CI runners.
 
   it("does not spawn the adapter for an already-cancelled call", async () => {
     const controller = new AbortController();

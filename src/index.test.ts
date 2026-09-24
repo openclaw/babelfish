@@ -286,5 +286,5 @@ describe("native OpenClaw hook entry", () => {
       }
       delete process.env.BABELFISH_TEST_HOOK_LOG;
     }
-  }, 20_000);
+  }, 30_000); // Covers cold Python and multiple Windows supervisor launches.
 });
