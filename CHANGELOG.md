@@ -6,7 +6,7 @@
 - Accept in-root bundle directories whose names begin with two dots while retaining parent-traversal and symlink escape checks.
 - Avoid leaving staging directories behind when a duplicate plugin install is rejected without `--force`.
 - Preserve Markdown frontmatter in imported skills, commands, and output styles with Windows line endings or a closing delimiter at end of file.
-- Refresh the MCP SDK, development dependencies, npm 11 tooling, and pinned CodeQL actions while retaining Node.js 22.19 support.
+- Refresh the MCP SDK to 1.30.1, development dependencies, npm 11 tooling, and pinned CodeQL actions while retaining Node.js 22.19 support.
 - Bound imported command-hook stdout and stderr so noisy hooks cannot exhaust
   OpenClaw memory before their timeout.
 - Preserve literal arguments in exec-form command hooks while retaining Windows process-tree supervision. Thanks @SebTardif.
