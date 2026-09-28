@@ -727,10 +727,14 @@ export async function invokeBundleHooks(
   payload: JsonObject,
   matchValue = "",
   evaluatePrompt?: (prompt: string, payload: JsonObject, timeoutMs: number) => Promise<JsonObject | undefined>,
+  includePlugin?: (plugin: BundlePlugin) => boolean,
 ): Promise<JsonObject[]> {
   const results: JsonObject[] = [];
   let currentPayload = payload;
   for (const plugin of await listBundlePlugins(config)) {
+    if (includePlugin && !includePlugin(plugin)) {
+      continue;
+    }
     for (const hook of plugin.hooks) {
       if (hook.event !== event || !matcherMatches(hook.matcher, matchValue)) {
         continue;

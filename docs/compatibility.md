@@ -47,6 +47,8 @@ Babelfish reads `.claude-plugin/plugin.json`, declared or conventional skill, co
 
 Command hooks run with `${CLAUDE_PLUGIN_ROOT}` set to the installed plugin directory. String `command` handlers run through a login shell. When `args` is set (Claude Code exec form), or when `command` is a string array, Babelfish spawns the executable directly without a shell. Single-turn `prompt` handlers use the active OpenClaw agent and model when `plugins.entries.babelfish.llm` allows both agent and model overrides. Without those trust flags they are reported but not executed. Multi-turn `agent` handlers are unsupported.
 
+For an imported plugin named `superpowers`, Babelfish runs its `SessionStart` hook at the first prompt build and checks that its `using-superpowers/SKILL.md` content reaches that run's final prompt. A missing or incomplete first-turn injection blocks that run so it can be retried. A successful run marks the guidance delivered for the session; a failed run releases that first-turn state. A later run can replace an unfinished attempt when the earlier gate has not started or has already passed; an in-flight gate retains ownership until it settles. This also permits retries after CLI failures that do not emit `agent_end`. OpenClaw raw model runs intentionally skip prompt building and remain outside this injection path. The guarantee for regular runs requires the selected OpenClaw executor to dispatch both `before_prompt_build` and `before_agent_run` before submitting the model request.
+
 ## Codex
 
 Babelfish reads `.codex-plugin/plugin.json`, declared or conventional skills, hooks, and MCP configuration. Manifest-inline hook declarations are supported. `${PLUGIN_ROOT}` is expanded for hook and MCP commands.

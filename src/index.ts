@@ -1,4 +1,6 @@
 import type { ChildProcess } from "node:child_process";
+import fs from "node:fs/promises";
+import path from "node:path";
 import readline from "node:readline";
 import { resolveConfig } from "./config.js";
 import {
@@ -7,6 +9,7 @@ import {
   hookUpdatedInput,
   invokeBundleHooks,
   listBundlePlugins,
+  type BundlePlugin,
 } from "./bundle-plugins.js";
 import { runBabelfishCli } from "./cli.js";
 import {
@@ -122,6 +125,71 @@ const promptContextByRun = new Map<string, string[]>();
 const outputStyleBySession = new Map<string, GeneratedOutputStyleEntry>();
 const monitorProcesses = new Map<string, ChildProcess[]>();
 const monitorContext = new Map<string, string[]>();
+
+type SuperpowersFirstPrompt = {
+  runId: string;
+  guidance: Promise<string | undefined>;
+  guidanceText?: string;
+  gateStarted?: boolean;
+  gatePassed?: boolean;
+  delivered?: boolean;
+};
+const superpowersStateKey = Symbol.for("openclaw.babelfish.superpowers-first-prompt");
+const superpowersFirstPrompt = (
+  (globalThis as unknown as Record<symbol, Map<string, SuperpowersFirstPrompt>>)[superpowersStateKey] ??=
+    new Map<string, SuperpowersFirstPrompt>()
+);
+const promptBuildRunsKey = Symbol.for("openclaw.babelfish.superpowers-prompt-build-runs");
+const superpowersPromptBuildRuns = (
+  (globalThis as unknown as Record<symbol, Map<string, Set<string>>>)[promptBuildRunsKey] ??=
+    new Map<string, Set<string>>()
+);
+
+function superpowersGenerationKey(sessionId: string): string {
+  return `${config.rootDir}\0${sessionId}`;
+}
+
+function markSuperpowersPromptBuild(event: unknown, ctx: unknown): void {
+  const sessionId = context(ctx).sessionId;
+  const runId = runKey(event, ctx);
+  if (!sessionId || !runId) return;
+  const key = superpowersGenerationKey(sessionId);
+  const runs = superpowersPromptBuildRuns.get(key) ?? new Set<string>();
+  runs.add(runId);
+  superpowersPromptBuildRuns.set(key, runs);
+}
+
+function clearSuperpowersPromptBuild(sessionId: string, runId: string): void {
+  const key = superpowersGenerationKey(sessionId);
+  const runs = superpowersPromptBuildRuns.get(key);
+  runs?.delete(runId);
+  if (runs?.size === 0) superpowersPromptBuildRuns.delete(key);
+}
+
+function isImportedSuperpowers(plugin: BundlePlugin): boolean {
+  return plugin.app === "claude-code" && plugin.key === "superpowers";
+}
+
+let importedSuperpowersPlugin: Promise<BundlePlugin | undefined> | undefined;
+function findImportedSuperpowers(): Promise<BundlePlugin | undefined> {
+  if (importedSuperpowersPlugin) return importedSuperpowersPlugin;
+  const pending = listBundlePlugins(config, "claude-code")
+    .then((plugins) => {
+      const found = plugins.find(isImportedSuperpowers);
+      if (!found && importedSuperpowersPlugin === pending) importedSuperpowersPlugin = undefined;
+      return found;
+    })
+    .catch((error: unknown) => {
+      if (importedSuperpowersPlugin === pending) importedSuperpowersPlugin = undefined;
+      throw error;
+    });
+  importedSuperpowersPlugin = pending;
+  return pending;
+}
+
+async function hasImportedSuperpowers(): Promise<boolean> {
+  return Boolean(await findImportedSuperpowers());
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -298,8 +366,74 @@ function bundlePayload(eventName: string, event: unknown, ctx: unknown): Record<
 
 let promptHookEvaluator: Parameters<typeof invokeBundleHooks>[4];
 
-async function bundleHooks(eventName: string, event: unknown, ctx: unknown, match = "") {
-  return invokeBundleHooks(config, eventName, bundlePayload(eventName, event, ctx), match, promptHookEvaluator);
+async function bundleHooks(
+  eventName: string,
+  event: unknown,
+  ctx: unknown,
+  match = "",
+  includePlugin?: (plugin: BundlePlugin) => boolean,
+) {
+  return invokeBundleHooks(
+    config,
+    eventName,
+    bundlePayload(eventName, event, ctx),
+    match,
+    promptHookEvaluator,
+    includePlugin,
+  );
+}
+
+async function superpowersGuidanceForFirstPrompt(event: unknown, ctx: unknown) {
+  const runtime = context(ctx);
+  const runId = runKey(event, ctx);
+  if (!runtime.sessionId || !runId) return undefined;
+  const plugin = await findImportedSuperpowers();
+  if (!plugin) return undefined;
+  const generationKey = superpowersGenerationKey(runtime.sessionId);
+  let entry = superpowersFirstPrompt.get(generationKey);
+  // CLI setup or persistence can fail without emitting agent_end. A new run
+  // may retry if the old gate never started or already passed; an in-flight
+  // gate retains ownership until it settles. Identity guards keep late
+  // callbacks from the old run from clearing the new entry.
+  if (
+    entry && !entry.delivered && entry.runId !== runId &&
+    (!entry.gateStarted || entry.gatePassed)
+  ) {
+    if (superpowersFirstPrompt.get(generationKey) === entry) {
+      superpowersFirstPrompt.delete(generationKey);
+    }
+    entry = undefined;
+  }
+  if (!entry) {
+    const source = sessionStartSources.get(runtime.sessionId) ?? "startup";
+    sessionStartSources.delete(runtime.sessionId);
+    const matchSource = source === "compact" || source === "clear" ? source : "startup";
+    const candidate: SuperpowersFirstPrompt = { runId, guidance: Promise.resolve(undefined) };
+    candidate.guidance = bundleHooks(
+      "SessionStart",
+      { sessionId: runtime.sessionId, source: matchSource },
+      ctx,
+      matchSource,
+      isImportedSuperpowers,
+    ).then(async (results) => {
+      const text = results.map(hookAdditionalContext).find(Boolean);
+      const skillBody = (await fs.readFile(
+        path.join(plugin.path, "skills", "using-superpowers", "SKILL.md"),
+        "utf8",
+      ).catch(() => "")).trimEnd();
+      const complete = skillBody && text?.includes(skillBody) ? text : undefined;
+      candidate.guidanceText = complete;
+      return complete;
+    }).catch((error: unknown) => {
+      if (superpowersFirstPrompt.get(generationKey) === candidate) {
+        superpowersFirstPrompt.delete(generationKey);
+      }
+      throw error;
+    });
+    entry = candidate;
+    superpowersFirstPrompt.set(generationKey, entry);
+  }
+  return entry.runId === runId ? entry.guidance : undefined;
 }
 
 function configurePromptHooks(api: OpenClawApi): void {
@@ -534,6 +668,8 @@ export function registerHermesCliCommands(
 function registerRunHooks(api: OpenClawApi): void {
   api.on("before_prompt_build", async (event, ctx) => {
     const rawEvent = record(event);
+    markSuperpowersPromptBuild(event, ctx);
+    const guidance = await superpowersGuidanceForFirstPrompt(event, ctx);
     const result = await invokeHermesMiddleware(
       config,
       {
@@ -542,13 +678,71 @@ function registerRunHooks(api: OpenClawApi): void {
         context: context(ctx),
       },
     );
-    return result.results.map(promptMutation).filter(Boolean).at(-1);
+    const mutation = result.results.map(promptMutation).filter(Boolean).at(-1);
+    return guidance
+      ? {
+          ...mutation,
+          prependContext: [guidance, mutation?.prependContext].filter(Boolean).join("\n\n"),
+        }
+      : mutation;
   });
 
   api.on("before_agent_run", async (event, ctx) => {
-    const imported = await bundleHooks("UserPromptSubmit", event, ctx);
+    const runtime = context(ctx);
+    const runId = runKey(event, ctx);
+    const generationKey = runtime.sessionId
+      ? superpowersGenerationKey(runtime.sessionId)
+      : undefined;
+    let firstBootstrap: { generationKey: string; entry: SuperpowersFirstPrompt } | undefined;
+    if (
+      generationKey && runId &&
+      superpowersPromptBuildRuns.get(generationKey)?.has(runId) &&
+      await hasImportedSuperpowers()
+    ) {
+      const bootstrap = generationKey ? superpowersFirstPrompt.get(generationKey) : undefined;
+      const prompt = record(event).prompt;
+      if (
+        !runtime.sessionId || !runId || !bootstrap ||
+        (!bootstrap.delivered && bootstrap.runId !== runId) ||
+        (bootstrap.runId === runId &&
+          (!bootstrap.guidanceText || typeof prompt !== "string" ||
+            !prompt.includes(bootstrap.guidanceText)))
+      ) {
+        if (generationKey && bootstrap?.runId === runId &&
+          superpowersFirstPrompt.get(generationKey) === bootstrap) {
+          superpowersFirstPrompt.delete(generationKey);
+        }
+        return {
+          outcome: "block",
+          reason: "Superpowers bootstrap was not included in the first model prompt",
+          message: "Superpowers guidance was not included in this model prompt. Please retry.",
+        };
+      }
+      if (bootstrap.runId === runId && generationKey) {
+        bootstrap.gateStarted = true;
+        firstBootstrap = { generationKey, entry: bootstrap };
+      }
+    }
+    let imported;
+    try {
+      imported = await bundleHooks("UserPromptSubmit", event, ctx);
+    } catch (error) {
+      if (firstBootstrap &&
+        superpowersFirstPrompt.get(firstBootstrap.generationKey) === firstBootstrap.entry) {
+        superpowersFirstPrompt.delete(firstBootstrap.generationKey);
+      }
+      throw error;
+    }
+    if (firstBootstrap &&
+      superpowersFirstPrompt.get(firstBootstrap.generationKey) !== firstBootstrap.entry) {
+      return { outcome: "block", reason: "Superpowers bootstrap run ended before gate completion" };
+    }
     const block = imported.map(hookBlock).find((decision) => decision.block);
     if (block) {
+      if (firstBootstrap &&
+        superpowersFirstPrompt.get(firstBootstrap.generationKey) === firstBootstrap.entry) {
+        superpowersFirstPrompt.delete(firstBootstrap.generationKey);
+      }
       return {
         outcome: "block",
         reason: block.reason ?? "Blocked by imported plugin hook",
@@ -561,6 +755,12 @@ function registerRunHooks(api: OpenClawApi): void {
       .filter((value): value is string => Boolean(value));
     if (key && additional.length > 0) {
       promptContextByRun.set(key, additional);
+    }
+    if (firstBootstrap) {
+      if (superpowersFirstPrompt.get(firstBootstrap.generationKey) !== firstBootstrap.entry) {
+        return { outcome: "block", reason: "Superpowers bootstrap run ended before gate completion" };
+      }
+      firstBootstrap.entry.gatePassed = true;
     }
     return { outcome: "pass" };
   });
@@ -609,11 +809,22 @@ function registerRunHooks(api: OpenClawApi): void {
     await invokeHook("post_llm_call", event, ctx);
   });
   api.on("agent_end", async (event, ctx) => {
-    await invokeHook("on_session_end", event, ctx);
-    const key = runKey(event, ctx);
-    if (key) {
-      promptContextByRun.delete(key);
+    const runId = runKey(event, ctx);
+    const runtime = context(ctx);
+    if (runtime.sessionId && runId) clearSuperpowersPromptBuild(runtime.sessionId, runId);
+    const generationKey = runtime.sessionId
+      ? superpowersGenerationKey(runtime.sessionId)
+      : undefined;
+    const entry = generationKey ? superpowersFirstPrompt.get(generationKey) : undefined;
+    if (entry && entry.runId === runId && !entry.delivered) {
+      if (record(event).success === true && entry.gatePassed) {
+        entry.delivered = true;
+      } else if (generationKey && superpowersFirstPrompt.get(generationKey) === entry) {
+        superpowersFirstPrompt.delete(generationKey);
+      }
     }
+    if (runId) promptContextByRun.delete(runId);
+    await invokeHook("on_session_end", event, ctx);
   });
   api.on("before_agent_finalize", async (event, ctx) => {
     const imported = await bundleHooks("Stop", event, ctx);
@@ -663,9 +874,15 @@ function registerSessionHooks(api: OpenClawApi): void {
         ? rawEvent.source
         : transitionSource ?? (rawEvent.resumedFrom ? "resume" : "startup");
       if (sessionId) {
-        sessionStartSources.delete(sessionId);
+        if (superpowersFirstPrompt.has(superpowersGenerationKey(sessionId))) {
+          sessionStartSources.delete(sessionId);
+        } else {
+          sessionStartSources.set(sessionId, source);
+        }
       }
-      const imported = await bundleHooks("SessionStart", event, ctx, source);
+      const imported = await bundleHooks(
+        "SessionStart", event, ctx, source, (plugin) => !isImportedSuperpowers(plugin),
+      );
       const additional = imported
         .map(hookAdditionalContext)
         .filter((value): value is string => Boolean(value));
@@ -708,6 +925,12 @@ function registerSessionHooks(api: OpenClawApi): void {
         await bundleHooks("SessionEnd", event, ctx, typeof reason === "string" ? reason : "");
       } finally {
         const key = sessionKey(event, ctx);
+        const sessionId = context(ctx).sessionId;
+        if (sessionId) {
+          superpowersFirstPrompt.delete(superpowersGenerationKey(sessionId));
+          superpowersPromptBuildRuns.delete(superpowersGenerationKey(sessionId));
+          sessionStartSources.delete(sessionId);
+        }
         if (key) {
           sessionStartContext.delete(key);
           sessionStartPending.delete(key);
