@@ -803,9 +803,9 @@ export async function invokeBundleHooks(
         }
         continue;
       }
-      const command = expandHookCommand(hook, plugin.path);
       let output: Awaited<ReturnType<typeof runHookCommand>>;
       try {
+        const command = expandHookCommand(hook, plugin.path);
         output = await runHookCommand(command, plugin.path, currentPayload, hook.timeoutMs);
       } catch (error) {
         console.warn(`Babelfish hook ${plugin.key}/${event} failed: ${(error as Error).message}`);

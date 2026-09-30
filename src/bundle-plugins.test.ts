@@ -304,6 +304,47 @@ process.exitCode = ${code};
     }
   }, 30_000);
 
+  it("keeps later hook decisions when one command references an unset variable", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-unset-hook-"));
+    const plugin = path.join(rootDir, "codex", "fixture");
+    const previous = process.env.CLAUDE_PROJECT_DIR;
+    delete process.env.CLAUDE_PROJECT_DIR;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      const readStdin = `let input=""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => {`;
+      await fs.writeFile(path.join(plugin, "keep.mjs"), `${readStdin} console.log(JSON.stringify({systemMessage:"kept"})); });`);
+      await fs.writeFile(path.join(plugin, "block.mjs"), `${readStdin} console.log(JSON.stringify({decision:"block",reason:"later hook"})); });`);
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: {
+          PreToolUse: [{
+            hooks: [
+              { type: "command", command: "node keep.mjs" },
+              { type: "command", command: "node missing.mjs ${CLAUDE_PROJECT_DIR}" },
+              { type: "command", command: "node block.mjs" },
+            ],
+          }],
+        },
+      }));
+      await expect(invokeBundleHooks({
+        rootDir,
+        installDir: path.join(rootDir, "hermes"),
+        python: "python3",
+        timeoutMs: fixtureTimeoutMs,
+        env: {},
+      }, "PreToolUse", { tool_input: { text: "ok" } })).resolves.toEqual([
+        { systemMessage: "kept" },
+        { decision: "block", reason: "later hook" },
+      ]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("CLAUDE_PROJECT_DIR"));
+    } finally {
+      warn.mockRestore();
+      if (previous === undefined) delete process.env.CLAUDE_PROJECT_DIR;
+      else process.env.CLAUDE_PROJECT_DIR = previous;
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("passes each pre-tool rewrite to subsequent hooks", async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
     const pluginRoot = path.join(rootDir, "codex", "fixture");
