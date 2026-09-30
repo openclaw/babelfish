@@ -1,4 +1,4 @@
-import { splitFrontmatter } from "./markdown.js";
+import { readFrontmatterScalar, splitFrontmatter } from "./markdown.js";
 
 describe("splitFrontmatter", () => {
   it("retains body bytes while normalizing frontmatter line endings", () => {
@@ -15,4 +15,40 @@ describe("splitFrontmatter", () => {
       expect(splitFrontmatter(source)).toBeUndefined();
     },
   );
+});
+
+describe("readFrontmatterScalar", () => {
+  it("keeps a one-line description", () => {
+    expect(readFrontmatterScalar('description: "Keep replies short"', "description")).toEqual({
+      value: "Keep replies short",
+      consumed: [0],
+    });
+  });
+
+  it("joins a folded description and leaves the next key", () => {
+    const frontmatter = [
+      "description: >",
+      "  Keep replies short",
+      "  and specific.",
+      "keep-coding-instructions: true",
+    ].join("\n");
+    expect(readFrontmatterScalar(frontmatter, "description")).toEqual({
+      value: "Keep replies short and specific.",
+      consumed: [0, 1, 2],
+    });
+    expect(readFrontmatterScalar(frontmatter, "keep-coding-instructions")?.value).toBe("true");
+  });
+
+  it("keeps line breaks in a literal description", () => {
+    const frontmatter = [
+      "description: |",
+      "  Commit the selected files",
+      "  after reviewing the diff.",
+      "argument-hint: '[files]'",
+    ].join("\n");
+    expect(readFrontmatterScalar(frontmatter, "description")).toEqual({
+      value: "Commit the selected files\nafter reviewing the diff.",
+      consumed: [0, 1, 2],
+    });
+  });
 });

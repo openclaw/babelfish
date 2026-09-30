@@ -20,7 +20,7 @@ import {
   type HermesToolSummary,
 } from "./hermes-python.js";
 import { syncHermesSkills } from "./skill-sync.js";
-import { splitFrontmatter } from "./markdown.js";
+import { readFrontmatterScalar, splitFrontmatter } from "./markdown.js";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const generatedRegistryFile = "babelfish.generated.json";
@@ -407,13 +407,16 @@ function convertedSkillMarkdown(name: string, source: string): string {
   const parsed = splitFrontmatter(source);
   if (parsed) {
     const { frontmatter } = parsed;
-    const match = frontmatter.match(/^description:\s*(.+)$/m);
-    if (match?.[1]) {
-      description = match[1].trim().replace(/^['"]|['"]$/g, "");
+    const descriptionField = readFrontmatterScalar(frontmatter, "description");
+    if (descriptionField?.value) {
+      description = descriptionField.value;
     }
+    const consumed = new Set(descriptionField?.consumed ?? []);
     preserved = frontmatter
       .split("\n")
-      .filter((line) => !/^(name|description|disable-model-invocation):/i.test(line));
+      .filter((line, index) => (
+        !consumed.has(index) && !/^(name|description|disable-model-invocation):/i.test(line)
+      ));
     body = parsed.body;
   }
   return [

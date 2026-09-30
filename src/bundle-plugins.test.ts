@@ -381,6 +381,29 @@ process.exitCode = ${code};
     }]);
   });
 
+  it("reads a folded output-style description", async () => {
+    const root = await fixture("claude-code");
+    await fs.mkdir(path.join(root, "output-styles"));
+    await fs.writeFile(path.join(root, "output-styles", "brief.md"), [
+      "---",
+      "name: Brief",
+      "description: >",
+      "  Keep replies short",
+      "  and specific.",
+      "keep-coding-instructions: true",
+      "---",
+      "Answer in three sentences.",
+      "",
+    ].join("\n"));
+    const plugin = await inspectBundlePlugin("claude-code", root);
+    expect(plugin.outputStyles).toEqual([{
+      name: "Brief",
+      description: "Keep replies short and specific.",
+      instructions: "Answer in three sentences.",
+      keepCodingInstructions: true,
+    }]);
+  });
+
   it("discovers always-on Claude monitors and reports deferred triggers", async () => {
     const root = await fixture("claude-code");
     await fs.mkdir(path.join(root, "monitors"));

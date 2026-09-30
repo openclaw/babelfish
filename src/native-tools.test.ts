@@ -442,4 +442,56 @@ await server.connect(new StdioServerTransport());
     await expect(fs.readFile(path.join(root, "skills", "babelfish-bundles", "claude-code-fixture-git-commit", "SKILL.md"), "utf8"))
       .resolves.toMatch(/description: "Commit selected files"[\s\S]*argument-hint: '\[files\]'[\s\S]*allowed-tools: Bash\(git status \*\)[\s\S]*disable-model-invocation: true[\s\S]*Commit \$ARGUMENTS\./);
   });
+
+  it("reads folded and literal descriptions from commands and agents", async () => {
+    const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-bundle-state-"));
+    const plugin = path.join(stateRoot, "claude-code", "fixture");
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-package-"));
+    await fs.mkdir(path.join(plugin, ".claude-plugin"), { recursive: true });
+    await fs.writeFile(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "fixture" }));
+    await fs.mkdir(path.join(plugin, "commands"), { recursive: true });
+    await fs.writeFile(path.join(plugin, "commands", "commit.md"), [
+      "---",
+      "description: |",
+      "  Commit the selected files",
+      "  after reviewing the diff.",
+      "argument-hint: '[files]'",
+      "---",
+      "Commit $ARGUMENTS.",
+      "",
+    ].join("\n"));
+    await fs.mkdir(path.join(plugin, "agents"), { recursive: true });
+    await fs.writeFile(path.join(plugin, "agents", "reviewer.md"), [
+      "---",
+      "name: Reviewer",
+      "description: >",
+      "  Review the change",
+      "  for regressions.",
+      "---",
+      "Look carefully.",
+      "",
+    ].join("\n"));
+    await fs.mkdir(path.join(root, "skills"));
+    await fs.writeFile(path.join(root, "openclaw.plugin.json"), JSON.stringify({ id: "babelfish", contracts: {} }));
+    await regenerateNativeTools(
+      { installDir: path.join(stateRoot, "hermes"), rootDir: stateRoot, python: "python3", timeoutMs: 1000, env: {} },
+      { root },
+    );
+    const command = await fs.readFile(
+      path.join(root, "skills", "babelfish-bundles", "claude-code-fixture-commit", "SKILL.md"),
+      "utf8",
+    );
+    expect(command).toContain('description: "Commit the selected files\\nafter reviewing the diff."');
+    expect(command).toContain("argument-hint: '[files]'");
+    expect(command).not.toContain("description: \"|\"");
+    expect(command).not.toMatch(/^ {2}Commit the selected files$/m);
+    expect(command).toContain("Commit $ARGUMENTS.");
+    const agent = await fs.readFile(
+      path.join(root, "skills", "babelfish-bundles", "claude-code-fixture-reviewer", "SKILL.md"),
+      "utf8",
+    );
+    expect(agent).toContain('description: "Review the change for regressions."');
+    expect(agent).not.toMatch(/^ {2}Review the change$/m);
+    expect(agent).toContain("Look carefully.");
+  });
 });
