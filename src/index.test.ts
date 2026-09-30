@@ -288,3 +288,70 @@ describe("native OpenClaw hook entry", () => {
     }
   }, 30_000); // Covers cold Python and multiple Windows supervisor launches.
 });
+
+describe("Stop hook finalization", () => {
+  async function finalize(decision: Record<string, unknown>) {
+    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-stop-hermes-"));
+    const bundleRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-stop-root-"));
+    const previous = process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR;
+    const previousRoot = process.env.OPENCLAW_BABELFISH_ROOT;
+    const pluginRoot = path.join(bundleRoot, "codex", "stop-hooks");
+    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    await fs.writeFile(
+      path.join(pluginRoot, "hook.mjs"),
+      `let input=""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { console.log(${JSON.stringify(JSON.stringify(decision))}); });`,
+    );
+    await fs.writeFile(
+      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+      JSON.stringify({
+        hooks: { Stop: [{ hooks: [{ type: "command", command: "node hook.mjs" }] }] },
+      }),
+    );
+    process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR = installDir;
+    process.env.OPENCLAW_BABELFISH_ROOT = bundleRoot;
+    try {
+      vi.resetModules();
+      const module = await import("./index.js");
+      const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+      module.default.register({
+        on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+          hooks.set(name, handler);
+        },
+        registerTool: () => undefined,
+        registerCommand: () => undefined,
+        registerCli: () => undefined,
+        registerAgentToolResultMiddleware: () => undefined,
+        logger: { warn: () => undefined },
+      });
+      return await hooks.get("before_agent_finalize")?.({}, {});
+    } finally {
+      if (previous === undefined) delete process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR;
+      else process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR = previous;
+      if (previousRoot === undefined) delete process.env.OPENCLAW_BABELFISH_ROOT;
+      else process.env.OPENCLAW_BABELFISH_ROOT = previousRoot;
+      await fs.rm(installDir, { recursive: true, force: true });
+      await fs.rm(bundleRoot, { recursive: true, force: true });
+    }
+  }
+
+  it("finalizes when a Stop hook sets continue false", async () => {
+    await expect(finalize({ continue: false, stopReason: "finished" })).resolves.toBeUndefined();
+  });
+
+  it("revises when a Stop hook sets decision block", async () => {
+    await expect(finalize({ decision: "block", reason: "tests failed" })).resolves.toEqual({
+      action: "revise",
+      reason: "tests failed",
+      retry: { instruction: "tests failed" },
+    });
+  });
+
+  it("lets continue false outrank a Stop block on the same hook", async () => {
+    await expect(finalize({
+      continue: false,
+      decision: "block",
+      reason: "keep going",
+      stopReason: "halt",
+    })).resolves.toBeUndefined();
+  });
+});

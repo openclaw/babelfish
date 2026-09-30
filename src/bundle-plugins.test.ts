@@ -274,6 +274,7 @@ describe("bundle plugins", () => {
 
   it("normalizes hook decisions", () => {
     expect(hookBlock({ decision: "block", reason: "no" })).toEqual({ block: true, reason: "no" });
+    expect(hookBlock({ continue: false, stopReason: "halt" })).toEqual({ block: true, reason: "halt" });
     expect(hookUpdatedInput({ hookSpecificOutput: { updatedInput: { value: 2 } } })).toEqual({ value: 2 });
   });
 
