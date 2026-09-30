@@ -4,6 +4,7 @@
 
 - Refresh the MCP SDK to 1.31.0, Vitest to 5.0.2, Node typings, transitive dependencies, and pinned CodeQL actions to 4.38.2 while retaining Node.js 22.19 support; clear two dependency audit advisories.
 - Time out plugin Git clones after 120 seconds, terminate stalled transport processes, and preserve existing installs on failure; override with `--clone-timeout-ms` or `OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS`. Thanks @SebTardif.
+- Cap background MCP tasks at eight isolated Hermes processes, holding slots until children exit while publishing task results promptly. Thanks @SebTardif.
 - Accept in-root bundle directories whose names begin with two dots while retaining parent-traversal and symlink escape checks.
 - Avoid leaving staging directories behind when a duplicate plugin install is rejected without `--force`.
 - Preserve Markdown frontmatter in imported skills, commands, and output styles with Windows line endings or a closing delimiter at end of file.

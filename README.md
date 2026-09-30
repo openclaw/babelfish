@@ -64,9 +64,9 @@ Babelfish does not expose install or uninstall as agent tools. The read-only `ba
 | `openclaw babelfish list [app]` | List installed plugins and detected surfaces |
 | `openclaw babelfish install <app> <git-url> [--name <name>] [--force] [--clone-timeout-ms <ms>]` | Install a source plugin from Git. Clone waits 120 seconds by default; pass `--clone-timeout-ms` or set `OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS` for a slower healthy remote |
 | `openclaw babelfish uninstall <app> <name>` | Remove an imported plugin |
-| `babelfish mcp` | Start the optional Hermes-only stdio MCP server |
+| `babelfish mcp` | Start the optional Hermes-only stdio MCP server; background tasks allow eight isolated processes, including children still exiting after completion or stop |
 
-The standalone MCP server is a compatibility fallback for MCP clients; native OpenClaw loading remains the recommended path. See [Manual MCP server](mcp/README.md) for setup and limitations.
+The standalone MCP server is a compatibility fallback for MCP clients; native OpenClaw loading remains the recommended path. See [Manual MCP server](mcp/README.md) for setup and limitations. Task results become available when the helper returns; its concurrency slot remains occupied until the child exits.
 
 ## Development
 
