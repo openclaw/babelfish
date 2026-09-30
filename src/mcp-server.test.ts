@@ -274,6 +274,14 @@ describe("Hermes MCP server", () => {
       ).resolves.toMatchObject({
         content: [{ type: "text", text: '{\n  "command": "from-command"\n}' }],
       });
+      await expect(
+        client.callTool({
+          name: "babelfish_command__hermes__simple__simple",
+          arguments: {},
+        }),
+      ).resolves.toMatchObject({
+        content: [{ type: "text", text: '{\n  "command": ""\n}' }],
+      });
 
       const started = await client.callTool({
         name: "babelfish_task_start",
