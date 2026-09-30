@@ -18,6 +18,8 @@ Bundle paths must stay inside the plugin root, including after resolving skill-r
 | User prompt commands | Full | N/A | Partial | Hermes commands become native slash commands; Claude commands become user-only skills |
 | Terminal CLI commands | Full | N/A | N/A | Registered as top-level `openclaw <command>` commands |
 | Command-hook process output | N/A | 1 MiB per stream | 1 MiB per stream | Codex and Claude Code command hooks are terminated and reported as failed if stdout or stderr exceeds the limit |
+| Command-hook process stdin | N/A | 1 MiB payload | 1 MiB payload | Oversized events do not start command hooks. Observer hooks are skipped; PreToolUse, UserPromptSubmit, and Stop return blocking decisions. |
+| Hook-file discovery | N/A | 50 unique files, depth 8 | 50 unique files, depth 8 | One file budget is shared across declared paths; overlapping files count once. Excess files or directory depth fail discovery. |
 | Command-hook invocation | N/A | String shell or exec `args` | String shell or exec `args` | String `command` runs via `/bin/sh -lc` (Windows uses `cmd.exe`). `args` or a `command` array spawn the executable without shell parsing. Both forms retain Windows Job supervision and process-tree cleanup. Plugin install is trusted code execution. |
 | Plugin-defined agents | N/A | N/A | Partial | Imported as user-only skills; model and tool isolation are not preserved |
 | Pre-tool command hooks | Full | Full | Full | Blocks and argument rewrites map to OpenClaw's pre-tool hook |

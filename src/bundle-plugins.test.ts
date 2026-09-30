@@ -11,9 +11,16 @@ import {
   invokeBundleHooks,
   type BundlePlugin,
   type BundleServer,
+  MAX_HOOK_JSON_FILES,
+  MAX_HOOK_WALK_DEPTH,
 } from "./bundle-plugins.js";
 
 const fixtureTimeoutMs = 15_000;
+
+function hookPayloadWithByteSize(bytes: number): Record<string, unknown> {
+  const overhead = Buffer.byteLength('{"tool_response":""}', "utf8");
+  return { tool_response: "x".repeat(bytes - overhead) };
+}
 
 async function fixture(app: "claude-code" | "codex") {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), `babelfish-${app}-`));
@@ -159,6 +166,112 @@ describe("bundle plugins", () => {
     }
   });
 
+  it("rejects hooks whose stdin payload exceeds 1 MiB", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const pluginRoot = path.join(rootDir, "codex", "fixture");
+    const marker = path.join(pluginRoot, "ran.txt");
+    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    await fs.writeFile(
+      path.join(pluginRoot, "reader.mjs"),
+      `import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(marker)}, "ran"); process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({ok:true})));`,
+    );
+    await fs.writeFile(
+      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+      JSON.stringify({
+        hooks: {
+          PostToolUse: [{ hooks: [{ type: "command", command: "node reader.mjs" }] }],
+        },
+      }),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const config = {
+      rootDir,
+      installDir: path.join(rootDir, "hermes"),
+      python: "python3",
+      timeoutMs: fixtureTimeoutMs,
+      env: {},
+    };
+    try {
+      await expect(invokeBundleHooks(config, "PostToolUse", hookPayloadWithByteSize(1024 * 1024 + 1))).resolves.toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("1048576-byte payload limit"));
+      await expect(fs.access(marker)).rejects.toThrow();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("runs hooks whose stdin payload is exactly 1 MiB", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const pluginRoot = path.join(rootDir, "codex", "fixture");
+    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    await fs.writeFile(
+      path.join(pluginRoot, "reader.mjs"),
+      "process.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify({hookSpecificOutput:{additionalContext:'ok'}})));",
+    );
+    await fs.writeFile(
+      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+      JSON.stringify({
+        hooks: {
+          PostToolUse: [{ hooks: [{ type: "command", command: "node reader.mjs" }] }],
+        },
+      }),
+    );
+    const config = {
+      rootDir,
+      installDir: path.join(rootDir, "hermes"),
+      python: "python3",
+      timeoutMs: fixtureTimeoutMs,
+      env: {},
+    };
+    await expect(
+      invokeBundleHooks(config, "PostToolUse", hookPayloadWithByteSize(1024 * 1024)),
+    ).resolves.toEqual([{ hookSpecificOutput: { additionalContext: "ok" } }]);
+  }, 30_000);
+
+  it.each(["PreToolUse", "UserPromptSubmit", "Stop"] as const)(
+    "blocks %s when stdin exceeds 1 MiB instead of skipping the decision",
+    async (event) => {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+      const pluginRoot = path.join(rootDir, "codex", "fixture");
+      const marker = path.join(pluginRoot, "ran.txt");
+      await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+      await fs.writeFile(
+        path.join(pluginRoot, "reader.mjs"),
+        `import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(marker)}, "ran"); process.exit(0);`,
+      );
+      await fs.writeFile(
+        path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+        JSON.stringify({
+          hooks: {
+            [event]: [{ hooks: [{ type: "command", command: "node reader.mjs" }] }],
+          },
+        }),
+      );
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const config = {
+        rootDir,
+        installDir: path.join(rootDir, "hermes"),
+        python: "python3",
+        timeoutMs: fixtureTimeoutMs,
+        env: {},
+      };
+      try {
+        await expect(
+          invokeBundleHooks(config, event, hookPayloadWithByteSize(1024 * 1024 + 1)),
+        ).resolves.toEqual([
+          {
+            decision: "block",
+            reason: expect.stringContaining("1048576-byte payload limit"),
+          },
+        ]);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("1048576-byte payload limit"));
+        await expect(fs.access(marker)).rejects.toThrow();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
   it("normalizes hook decisions", () => {
     expect(hookBlock({ decision: "block", reason: "no" })).toEqual({ block: true, reason: "no" });
     expect(hookUpdatedInput({ hookSpecificOutput: { updatedInput: { value: 2 } } })).toEqual({ value: 2 });
@@ -182,7 +295,7 @@ process.exitCode = ${code};
       const results = await invokeBundleHooks({
         rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
         timeoutMs: fixtureTimeoutMs, env: {},
-      }, "PreToolUse", { tool_input: { text: "x".repeat(2 * 1024 * 1024) } });
+      }, "PreToolUse", { tool_input: { text: "x".repeat(512 * 1024) } });
       expect(results).toEqual(code === 0
         ? [{ systemMessage: "ready" }]
         : [{ decision: "block", reason: "denied" }]);
@@ -406,6 +519,196 @@ process.exitCode = ${code};
     ]);
     await expect(invokeBundleHooks(config, "SessionEnd", {})).resolves.toEqual([]);
   }, 30_000); // Four Windows supervisor launches can exceed Vitest's default deadline.
+
+  it("rejects a hook directory with more than 50 JSON files", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-files-"));
+    const hooksDir = path.join(root, "hooks");
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(hooksDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "too-many-hooks", hooks: "./hooks" }),
+    );
+    const hook = { SessionStart: [{ hooks: [{ type: "command", command: "exit 0" }] }] };
+    for (let index = 0; index < MAX_HOOK_JSON_FILES + 1; index += 1) {
+      await fs.writeFile(
+        path.join(hooksDir, `hook-${String(index).padStart(2, "0")}.json`),
+        JSON.stringify({ hooks: hook }),
+      );
+    }
+    await expect(inspectBundlePlugin("codex", root)).rejects.toThrow(
+      `Plugin hook tree exceeded the ${MAX_HOOK_JSON_FILES}-file limit`,
+    );
+  });
+
+  it("loads a hook directory at the 50-file cap", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-cap-"));
+    const hooksDir = path.join(root, "hooks");
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(hooksDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "hook-file-cap", hooks: "./hooks" }),
+    );
+    const hook = { SessionStart: [{ hooks: [{ type: "command", command: "exit 0" }] }] };
+    for (let index = 0; index < MAX_HOOK_JSON_FILES; index += 1) {
+      await fs.writeFile(
+        path.join(hooksDir, `hook-${String(index).padStart(2, "0")}.json`),
+        JSON.stringify({ hooks: hook }),
+      );
+    }
+    const plugin = await inspectBundlePlugin("codex", root);
+    expect(plugin.hooks).toHaveLength(MAX_HOOK_JSON_FILES);
+  });
+
+  it("counts conventional hooks.json once when the declared hooks directory also contains it", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-conventional-"));
+    const hooksDir = path.join(root, "hooks");
+    await fs.mkdir(path.join(root, ".claude-plugin"), { recursive: true });
+    await fs.mkdir(hooksDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "conventional-plus-dir", hooks: "./hooks" }),
+    );
+    const hook = { SessionStart: [{ hooks: [{ type: "command", command: "exit 0" }] }] };
+    await fs.writeFile(path.join(hooksDir, "hooks.json"), JSON.stringify({ hooks: hook }));
+    for (let index = 1; index < MAX_HOOK_JSON_FILES; index += 1) {
+      await fs.writeFile(
+        path.join(hooksDir, `hook-${String(index).padStart(2, "0")}.json`),
+        JSON.stringify({ hooks: hook }),
+      );
+    }
+    const plugin = await inspectBundlePlugin("claude-code", root);
+    expect(plugin.hooks).toHaveLength(MAX_HOOK_JSON_FILES);
+  });
+
+  it("charges overlapping Codex hook paths once at the 50-file cap", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-overlap-"));
+    const hooksDir = path.join(root, "hooks");
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(hooksDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "overlap-cap", hooks: ["hooks/hooks.json", "./hooks"] }),
+    );
+    const hook = { SessionStart: [{ hooks: [{ type: "command", command: "exit 0" }] }] };
+    await fs.writeFile(path.join(hooksDir, "hooks.json"), JSON.stringify({ hooks: hook }));
+    for (let index = 1; index < MAX_HOOK_JSON_FILES; index += 1) {
+      await fs.writeFile(
+        path.join(hooksDir, `hook-${String(index).padStart(2, "0")}.json`),
+        JSON.stringify({ hooks: hook }),
+      );
+    }
+    const plugin = await inspectBundlePlugin("codex", root);
+    expect(plugin.hooks).toHaveLength(MAX_HOOK_JSON_FILES);
+  });
+
+  it("still rejects overlapping Codex hook paths that exceed 50 unique files", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-overlap-over-"));
+    const hooksDir = path.join(root, "hooks");
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(hooksDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "overlap-over", hooks: ["hooks/hooks.json", "./hooks"] }),
+    );
+    const hook = { SessionStart: [{ hooks: [{ type: "command", command: "exit 0" }] }] };
+    await fs.writeFile(path.join(hooksDir, "hooks.json"), JSON.stringify({ hooks: hook }));
+    for (let index = 1; index < MAX_HOOK_JSON_FILES + 1; index += 1) {
+      await fs.writeFile(
+        path.join(hooksDir, `hook-${String(index).padStart(2, "0")}.json`),
+        JSON.stringify({ hooks: hook }),
+      );
+    }
+    await expect(inspectBundlePlugin("codex", root)).rejects.toThrow(
+      `Plugin hook tree exceeded the ${MAX_HOOK_JSON_FILES}-file limit`,
+    );
+  });
+
+  it("shares the 50-file cap across declared hook directories", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-shared-"));
+    const firstDir = path.join(root, "hooks-a");
+    const secondDir = path.join(root, "hooks-b");
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(firstDir, { recursive: true });
+    await fs.mkdir(secondDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "shared-cap", hooks: ["./hooks-a", "./hooks-b"] }),
+    );
+    const hook = { SessionStart: [{ hooks: [{ type: "command", command: "exit 0" }] }] };
+    const perDir = Math.ceil((MAX_HOOK_JSON_FILES + 1) / 2);
+    for (let index = 0; index < perDir; index += 1) {
+      await fs.writeFile(
+        path.join(firstDir, `a-${String(index).padStart(2, "0")}.json`),
+        JSON.stringify({ hooks: hook }),
+      );
+      await fs.writeFile(
+        path.join(secondDir, `b-${String(index).padStart(2, "0")}.json`),
+        JSON.stringify({ hooks: hook }),
+      );
+    }
+    await expect(inspectBundlePlugin("codex", root)).rejects.toThrow(
+      `Plugin hook tree exceeded the ${MAX_HOOK_JSON_FILES}-file limit`,
+    );
+  });
+
+  it("walks a wide non-JSON directory without loading it as one array", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-wide-"));
+    const hooksDir = path.join(root, "hooks");
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(hooksDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "wide-hooks", hooks: "./hooks" }),
+    );
+    for (let index = 0; index < 80; index += 1) {
+      await fs.writeFile(path.join(hooksDir, `noise-${String(index).padStart(2, "0")}.txt`), "x");
+    }
+    await fs.writeFile(
+      path.join(hooksDir, "session.json"),
+      JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: "exit 0" }] }] } }),
+    );
+    const plugin = await inspectBundlePlugin("codex", root);
+    expect(plugin.hooks).toEqual([expect.objectContaining({ event: "SessionEnd" })]);
+  });
+
+  it("rejects a hook directory deeper than 8 levels", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-depth-"));
+    const segments = Array.from({ length: MAX_HOOK_WALK_DEPTH + 1 }, (_, index) => `d${index}`);
+    const deepDir = path.join(root, "hooks", ...segments);
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(deepDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "deep-hooks", hooks: "./hooks" }),
+    );
+    await fs.writeFile(
+      path.join(deepDir, "session.json"),
+      JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: "exit 0" }] }] } }),
+    );
+    await expect(inspectBundlePlugin("codex", root)).rejects.toThrow(
+      `Plugin hook tree exceeded the ${MAX_HOOK_WALK_DEPTH}-directory depth limit`,
+    );
+  });
+
+  it("loads a hook file at the 8-directory depth cap", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-depth-ok-"));
+    const segments = Array.from({ length: MAX_HOOK_WALK_DEPTH }, (_, index) => `d${index}`);
+    const deepDir = path.join(root, "hooks", ...segments);
+    await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
+    await fs.mkdir(deepDir, { recursive: true });
+    await fs.writeFile(
+      path.join(root, ".codex-plugin", "plugin.json"),
+      JSON.stringify({ name: "depth-ok", hooks: "./hooks" }),
+    );
+    await fs.writeFile(
+      path.join(deepDir, "session.json"),
+      JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: "exit 0" }] }] } }),
+    );
+    const plugin = await inspectBundlePlugin("codex", root);
+    expect(plugin.hooks).toEqual([expect.objectContaining({ event: "SessionEnd" })]);
+  });
 });
 
 function bundlePlugin(root: string): BundlePlugin {

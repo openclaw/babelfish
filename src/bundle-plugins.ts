@@ -29,6 +29,15 @@ const SUPPORTED_HOOK_EVENTS = new Set([
 ]);
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 const MAX_LIST_TOOLS_PAGES = 50;
+const MAX_HOOK_STDIN_BYTES = MAX_HOOK_OUTPUT_BYTES;
+const DECISION_HOOK_EVENTS = new Set(["PreToolUse", "UserPromptSubmit", "Stop"]);
+class HookStdinLimitError extends Error {
+  constructor() {
+    super(`Hook stdin exceeded the ${MAX_HOOK_STDIN_BYTES}-byte payload limit`);
+  }
+}
+export const MAX_HOOK_JSON_FILES = 50;
+export const MAX_HOOK_WALK_DEPTH = 8;
 
 export type BundleServer = {
   name: string;
@@ -327,12 +336,11 @@ async function readHooks(
     collectHooks(app, object(inline.hooks) ?? inline, hooks, unsupported);
   }
   const seen = new Set<string>();
+  let remainingJsonFiles = MAX_HOOK_JSON_FILES;
   for (const candidate of paths) {
-    for (const file of await hookFiles(root, candidate)) {
-      if (seen.has(file)) {
-        continue;
-      }
-      seen.add(file);
+    const discovered = await hookFiles(root, candidate, remainingJsonFiles, seen);
+    remainingJsonFiles -= discovered.length;
+    for (const file of discovered) {
       const raw = await readJson(file);
       const events = object(raw?.hooks) ?? raw;
       if (events) {
@@ -343,7 +351,12 @@ async function readHooks(
   return { hooks, unsupported };
 }
 
-async function hookFiles(root: string, candidate: string): Promise<string[]> {
+async function hookFiles(
+  root: string,
+  candidate: string,
+  remainingJsonFiles: number,
+  seen: Set<string>,
+): Promise<string[]> {
   const target = underRoot(root, candidate);
   let stats;
   try {
@@ -358,23 +371,45 @@ async function hookFiles(root: string, candidate: string): Promise<string[]> {
     throw new Error(`Plugin hook path uses a symlink: ${candidate}`);
   }
   if (!stats.isDirectory()) {
+    if (seen.has(target)) {
+      return [];
+    }
+    if (remainingJsonFiles <= 0) {
+      throw new Error(`Plugin hook tree exceeded the ${MAX_HOOK_JSON_FILES}-file limit`);
+    }
+    seen.add(target);
     return [target];
   }
   const files: string[] = [];
-  async function walk(directory: string): Promise<void> {
-    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
-      const child = path.join(directory, entry.name);
-      if (entry.isSymbolicLink()) {
-        throw new Error(`Plugin hook path uses a symlink: ${path.relative(root, child)}`);
+  async function walk(directory: string, depth: number): Promise<void> {
+    if (depth > MAX_HOOK_WALK_DEPTH) {
+      throw new Error(`Plugin hook tree exceeded the ${MAX_HOOK_WALK_DEPTH}-directory depth limit`);
+    }
+    const dir = await fs.opendir(directory);
+    try {
+      for await (const entry of dir) {
+        const child = path.join(directory, entry.name);
+        if (entry.isSymbolicLink()) {
+          throw new Error(`Plugin hook path uses a symlink: ${path.relative(root, child)}`);
+        }
+        if (entry.isDirectory()) {
+          await walk(child, depth + 1);
+        } else if (entry.isFile() && entry.name.endsWith(".json")) {
+          if (seen.has(child)) {
+            continue;
+          }
+          if (files.length >= remainingJsonFiles) {
+            throw new Error(`Plugin hook tree exceeded the ${MAX_HOOK_JSON_FILES}-file limit`);
+          }
+          seen.add(child);
+          files.push(child);
+        }
       }
-      if (entry.isDirectory()) {
-        await walk(child);
-      } else if (entry.isFile() && entry.name.endsWith(".json")) {
-        files.push(child);
-      }
+    } finally {
+      await dir.close().catch(() => undefined);
     }
   }
-  await walk(target);
+  await walk(target, 0);
   return files.sort();
 }
 
@@ -774,6 +809,9 @@ export async function invokeBundleHooks(
         output = await runHookCommand(command, plugin.path, currentPayload, hook.timeoutMs);
       } catch (error) {
         console.warn(`Babelfish hook ${plugin.key}/${event} failed: ${(error as Error).message}`);
+        if (DECISION_HOOK_EVENTS.has(event) && error instanceof HookStdinLimitError) {
+          results.push({ decision: "block", reason: error.message });
+        }
         continue;
       }
       if (output.blocked) {
@@ -849,6 +887,10 @@ function runHookCommand(
   payload: JsonObject,
   timeoutMs: number,
 ): Promise<{ stdout: string; blocked?: boolean; blockReason?: string }> {
+  const stdin = JSON.stringify(payload);
+  if (Buffer.byteLength(stdin, "utf8") > MAX_HOOK_STDIN_BYTES) {
+    return Promise.reject(new HookStdinLimitError());
+  }
   return new Promise((resolve, reject) => {
     const child = spawnShellCommand(command, {
       cwd,
@@ -925,6 +967,6 @@ function runHookCommand(
         finish(new Error(Buffer.concat(stderr).toString("utf8") || `Hook exited with ${code}`));
       }
     });
-    child.stdin!.end(JSON.stringify(payload));
+    child.stdin!.end(stdin);
   });
 }
