@@ -274,6 +274,9 @@ describe("bundle plugins", () => {
 
   it("normalizes hook decisions", () => {
     expect(hookBlock({ decision: "block", reason: "no" })).toEqual({ block: true, reason: "no" });
+    expect(hookBlock({ continue: false, stopReason: "halt" })).toEqual({ block: true, reason: "halt" });
+    expect(hookBlock({ continue: false, stopReason: "halt", decision: "block", reason: "revise" }))
+      .toEqual({ block: true, reason: "halt" });
     expect(hookUpdatedInput({ hookSpecificOutput: { updatedInput: { value: 2 } } })).toEqual({ value: 2 });
   });
 
@@ -300,6 +303,88 @@ process.exitCode = ${code};
         ? [{ systemMessage: "ready" }]
         : [{ decision: "block", reason: "denied" }]);
     } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("preserves earlier decisions, context, rewrites and later hooks after expansion failure", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-unset-hook-"));
+    const plugin = path.join(rootDir, "codex", "fixture");
+    const previous = process.env.CLAUDE_PROJECT_DIR;
+    delete process.env.CLAUDE_PROJECT_DIR;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      const readStdin = `let input=""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => {`;
+      await fs.writeFile(path.join(plugin, "keep.mjs"), `${readStdin} console.log(JSON.stringify({systemMessage:"kept",decision:"block",reason:"earlier hook",hookSpecificOutput:{updatedInput:{text:"rewritten"}}})); });`);
+      await fs.writeFile(path.join(plugin, "block.mjs"), `${readStdin} console.log(JSON.stringify({decision:"block",reason:JSON.parse(input).tool_input.text})); });`);
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: {
+          PreToolUse: [{
+            hooks: [
+              { type: "command", command: "node keep.mjs" },
+              { type: "command", command: "node missing.mjs ${CLAUDE_PROJECT_DIR}" },
+              { type: "command", command: "node block.mjs" },
+            ],
+          }],
+        },
+      }));
+      await expect(invokeBundleHooks({
+        rootDir,
+        installDir: path.join(rootDir, "hermes"),
+        python: "python3",
+        timeoutMs: fixtureTimeoutMs,
+        env: {},
+      }, "PreToolUse", { tool_input: { text: "ok" } })).resolves.toEqual([
+        { systemMessage: "kept", decision: "block", reason: "earlier hook", hookSpecificOutput: { updatedInput: { text: "rewritten" } } },
+        { decision: "block", reason: expect.stringContaining("command expansion failed") },
+        { decision: "block", reason: "rewritten" },
+      ]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("CLAUDE_PROJECT_DIR"));
+    } finally {
+      warn.mockRestore();
+      if (previous === undefined) delete process.env.CLAUDE_PROJECT_DIR;
+      else process.env.CLAUDE_PROJECT_DIR = previous;
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["string", "args", "array"])("isolates %s expansion failure without dropping decision guards", async (form) => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-expand-"));
+    const plugin = path.join(rootDir, "codex", "fixture");
+    const previous = process.env.BABELFISH_TEST_UNSET;
+    delete process.env.BABELFISH_TEST_UNSET;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      const missing = "${BABELFISH_TEST_UNSET}";
+      const hook = form === "string"
+        ? { type: "command", command: `node ${missing}` }
+        : form === "args"
+          ? { type: "command", command: process.execPath, args: [missing] }
+          : { type: "command", command: [process.execPath, missing] };
+      const manifest = path.join(plugin, ".codex-plugin", "plugin.json");
+      await fs.writeFile(path.join(plugin, "later.mjs"),
+        'process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({systemMessage:"later"})));');
+      const config = { rootDir, installDir: path.join(rootDir, "hermes"), python: "python3", timeoutMs: fixtureTimeoutMs, env: {} };
+      for (const event of ["PreToolUse", "UserPromptSubmit", "Stop", "PostToolUse"]) {
+        const expected = event === "PostToolUse" ? [] : [{
+          decision: "block", reason: expect.stringContaining("BABELFISH_TEST_UNSET"),
+        }];
+        await fs.writeFile(manifest, JSON.stringify({ hooks: { [event]: [{ hooks: [hook] }] } }));
+        await expect(invokeBundleHooks(config, event, {})).resolves.toEqual(expected);
+        await fs.writeFile(manifest, JSON.stringify({ hooks: { [event]: [{ hooks: [
+          hook, { type: "command", command: [process.execPath, "later.mjs"] },
+        ] }] } }));
+        await expect(invokeBundleHooks(config, event, {})).resolves.toEqual([
+          ...expected, { systemMessage: "later" },
+        ]);
+      }
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("command expansion failed"));
+    } finally {
+      warn.mockRestore();
+      if (previous === undefined) delete process.env.BABELFISH_TEST_UNSET;
+      else process.env.BABELFISH_TEST_UNSET = previous;
       await fs.rm(rootDir, { recursive: true, force: true });
     }
   }, 30_000);

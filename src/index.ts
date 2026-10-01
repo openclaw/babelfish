@@ -617,9 +617,13 @@ function registerRunHooks(api: OpenClawApi): void {
   });
   api.on("before_agent_finalize", async (event, ctx) => {
     const imported = await bundleHooks("Stop", event, ctx);
-    const block = imported.map(hookBlock).find((decision) => decision.block);
-    return block
-      ? { action: "revise", reason: block.reason, retry: { instruction: block.reason ?? "Continue." } }
+    // Claude Code: continue false stops the turn and outranks a Stop decision.
+    const revise = imported
+      .filter((result) => result.continue !== false)
+      .map(hookBlock)
+      .find((decision) => decision.block);
+    return revise
+      ? { action: "revise", reason: revise.reason, retry: { instruction: revise.reason ?? "Continue." } }
       : undefined;
   });
   api.on("before_compaction", async (event, ctx) => {

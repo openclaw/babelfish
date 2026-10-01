@@ -8,6 +8,44 @@ async function copyFixture(target: string): Promise<void> {
 }
 
 describe("native OpenClaw hook entry", () => {
+  it.each([
+    ["PreToolUse", "before_tool_call", { block: true }],
+    ["UserPromptSubmit", "before_agent_run", { outcome: "block" }],
+    ["Stop", "before_agent_finalize", { action: "revise" }],
+  ] as const)("blocks failed %s expansion through the registered handler", async (eventName, handlerName, expected) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-failed-guard-"));
+    const plugin = path.join(root, "codex", "guard");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
+    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "hermes"));
+    vi.stubEnv("BABELFISH_TEST_UNSET", undefined);
+    try {
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: { [eventName]: [{ hooks: [{ type: "command", command: "node ${BABELFISH_TEST_UNSET}" }] }] },
+      }));
+      vi.resetModules();
+      const entry = (await import("./index.js")).default;
+      const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+      entry.register({
+        on: (name, handler) => { hooks.set(name, handler); },
+        registerTool: () => undefined,
+        registerCommand: () => undefined,
+        registerCli: () => undefined,
+        registerAgentToolResultMiddleware: () => undefined,
+        logger: { warn: () => undefined },
+      });
+      const result = await hooks.get(handlerName)?.({ toolName: "fixture" }, {});
+      expect(result).toMatchObject(expected);
+      expect(JSON.stringify(result)).toContain("command expansion failed");
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("BABELFISH_TEST_UNSET"));
+    } finally {
+      vi.unstubAllEnvs();
+      warn.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("registers hooks and maps Hermes pre_tool_call blocks", async () => {
     const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-native-"));
     await copyFixture(installDir);
@@ -287,4 +325,119 @@ describe("native OpenClaw hook entry", () => {
       delete process.env.BABELFISH_TEST_HOOK_LOG;
     }
   }, 30_000); // Covers cold Python and multiple Windows supervisor launches.
+});
+
+describe("Stop hook finalization", () => {
+  async function finalize(
+    decision: Record<string, unknown> | Record<string, unknown>[],
+    options: { event?: Record<string, unknown>; hookEvent?: string; exitCode?: number } = {},
+  ) {
+    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-stop-hermes-"));
+    const bundleRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-stop-root-"));
+    const previous = process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR;
+    const previousRoot = process.env.OPENCLAW_BABELFISH_ROOT;
+    const pluginRoot = path.join(bundleRoot, "codex", "stop-hooks");
+    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    const decisions = Array.isArray(decision) ? decision : [decision];
+    for (const [index, result] of decisions.entries()) {
+      await fs.writeFile(
+        path.join(pluginRoot, `hook-${index}.mjs`),
+        `process.stdin.resume(); process.stdin.on("end", () => { console.log(${JSON.stringify(JSON.stringify(result))}); process.exitCode = ${options.exitCode ?? 0}; });`,
+      );
+    }
+    await fs.writeFile(
+      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+      JSON.stringify({
+        hooks: { [options.hookEvent ?? "Stop"]: [{ hooks: decisions.map((_, index) => ({
+          type: "command",
+          command: [process.execPath, `hook-${index}.mjs`],
+        })) }] },
+      }),
+    );
+    process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR = installDir;
+    process.env.OPENCLAW_BABELFISH_ROOT = bundleRoot;
+    try {
+      vi.resetModules();
+      const module = await import("./index.js");
+      const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+      module.default.register({
+        on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+          hooks.set(name, handler);
+        },
+        registerTool: () => undefined,
+        registerCommand: () => undefined,
+        registerCli: () => undefined,
+        registerAgentToolResultMiddleware: () => undefined,
+        logger: { warn: () => undefined },
+      });
+      const handler = options.hookEvent === "PreToolUse" ? "before_tool_call"
+        : options.hookEvent === "UserPromptSubmit" ? "before_agent_run"
+        : "before_agent_finalize";
+      return await hooks.get(handler)?.(options.event ?? {}, {});
+    } finally {
+      if (previous === undefined) delete process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR;
+      else process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR = previous;
+      if (previousRoot === undefined) delete process.env.OPENCLAW_BABELFISH_ROOT;
+      else process.env.OPENCLAW_BABELFISH_ROOT = previousRoot;
+      await fs.rm(installDir, { recursive: true, force: true });
+      await fs.rm(bundleRoot, { recursive: true, force: true });
+    }
+  }
+
+  it("finalizes when a Stop hook sets continue false", async () => {
+    await expect(finalize({ continue: false, stopReason: "finished" })).resolves.toBeUndefined();
+  });
+
+  it("revises when a Stop hook sets decision block", async () => {
+    await expect(finalize({ decision: "block", reason: "tests failed" })).resolves.toEqual({
+      action: "revise",
+      reason: "tests failed",
+      retry: { instruction: "tests failed" },
+    });
+  });
+
+  it("lets continue false outrank a Stop block on the same hook", async () => {
+    await expect(finalize({
+      continue: false,
+      decision: "block",
+      reason: "keep going",
+      stopReason: "halt",
+    })).resolves.toBeUndefined();
+  });
+
+  it.each([false, true])("retains a separate Stop block (block first: %s)", async (blockFirst) => {
+    const decisions = [
+      { continue: false, stopReason: "finished" },
+      { decision: "block", reason: "separate guard" },
+    ];
+    await expect(finalize(blockFirst ? decisions.reverse() : decisions)).resolves.toEqual({
+      action: "revise",
+      reason: "separate guard",
+      retry: { instruction: "separate guard" },
+    });
+  });
+
+  it("retains revision for exit-2 Stop hooks", async () => {
+    await expect(finalize({ continue: false }, { exitCode: 2 })).resolves.toMatchObject({
+      action: "revise",
+      reason: expect.stringContaining("Stop hook"),
+    });
+  });
+
+  it("retains revision for oversized Stop input", async () => {
+    await expect(finalize({ continue: false }, {
+      event: { text: "x".repeat(1024 * 1024) },
+    })).resolves.toMatchObject({
+      action: "revise",
+      reason: expect.stringContaining("1048576-byte payload limit"),
+    });
+  });
+
+  it.each(["PreToolUse", "UserPromptSubmit"])("still blocks %s for continue false", async (hookEvent) => {
+    await expect(finalize({ continue: false, stopReason: "halt" }, { hookEvent })).resolves.toEqual(
+      hookEvent === "PreToolUse"
+        ? { block: true, blockReason: "halt" }
+        : { outcome: "block", reason: "halt", message: "halt" },
+    );
+  });
 });

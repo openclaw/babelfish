@@ -42,9 +42,11 @@ Installing an already installed name requires `--force`; a rejected duplicate le
 | --- | --- |
 | Agent and MCP tools | Native tools that retain the source JSON schema. MCP inspection follows at most 50 tool pages within one request-timeout budget and rejects repeated cursors. |
 | Skills and support files | Native OpenClaw skills with referenced files intact; Markdown frontmatter supports LF and Windows CRLF. Generated command, agent, and output-style descriptions support literal and folded YAML blocks, header comments, one-digit indentation indicators, and clip/strip/keep chomping. Copied skill bodies and assets remain intact. In-root directory names such as `..skills` are supported. |
-| Prompt and terminal commands | User-invoked skills or top-level CLI commands when the source format supports them |
+| Prompt and terminal commands | User-invoked skills or top-level CLI commands when the source format supports them. Hermes MCP command tools accept optional `args`: omitted arguments, `{}`, or an empty `args` string pass `""`; explicit text is preserved. |
 | Compatible hooks | Matching lifecycle, prompt, tool, compaction, and subagent hooks. Discovery permits 50 unique hook files and eight nested directories. Command-hook stdin is capped at 1 MiB; oversized decision events fail closed. String commands use a login shell; `args` or a `command` array spawn without a shell. |
 | Compatible middleware | Matching prompt-build and tool-result middleware |
+| Hook command expansion | An unresolved variable blocks PreToolUse, UserPromptSubmit, and Stop decisions while preserving earlier results and running later hooks. Observer expansion failures warn and continue. Execution-error handling is unchanged. |
+| Stop hook decisions | On upgrade, installed Claude Code and Codex Stop hooks with `continue: false` finish the turn rather than request revision. This takes precedence over a block on the same hook only; a separate blocking hook still requests revision in either order. Pre-tool and prompt blocking is unchanged. |
 | Unsupported behavior | Recorded during generation and reported at Gateway startup |
 
 Support differs by source app and surface. See the [compatibility reference](docs/compatibility.md) for the full matrix, source-specific behavior, configuration, and example plugins.

@@ -28,7 +28,7 @@ Bundle paths must stay inside the plugin root, including after resolving skill-r
 | Session start hooks | Full | Full | Full | Additional context is injected into the next agent turn |
 | Session end hooks | Full | Full | Full | Codex hooks must be declared by its supported manifest or conventional path |
 | User-prompt hooks | Partial | Partial | Partial | Additional context maps; prompt replacement and hard stop do not |
-| Stop/finalization hooks | Full | Full | Full | Hermes finalization is observer-only; Codex and Claude continue/block decisions map directly |
+| Stop/finalization hooks | Full | Full | Full | Hermes finalization is observer-only. Codex and Claude `decision: "block"` asks OpenClaw to revise. `continue: false` allows finalization and outranks a block on the same hook. |
 | Pre/post compaction hooks | N/A | Full | Full | Observation hooks run around OpenClaw compaction |
 | Subagent lifecycle hooks | Full | Full | Full | Mapped to OpenClaw subagent start/end hooks |
 | Prompt or agent hook handlers | N/A | No | Partial | Claude prompt handlers use the active OpenClaw model; Codex prompt handlers and multi-turn agent handlers remain listed only |
@@ -45,6 +45,12 @@ Bundle paths must stay inside the plugin root, including after resolving skill-r
 
 ## Claude Code
 
+For installed Claude Code and Codex Stop hooks, upgrading changes
+`continue: false` from requesting revision to finishing the turn. Precedence is
+per hook: a separate hook's block still requests revision in either order.
+Exit-2 and oversized-input Stop decisions also still request revision.
+Pre-tool and prompt hooks continue to treat `continue: false` as blocking.
+
 Babelfish reads `.claude-plugin/plugin.json`, declared or conventional skill, command, agent, output-style, hook, and MCP paths. Existing `SKILL.md` directories are copied intact. Markdown commands, agents, and output styles are converted to user-invoked OpenClaw skills.
 
 Generated descriptions read literal (`|`) and folded (`>`) YAML block scalars,
@@ -58,6 +64,13 @@ bytes or support files. This is a scalar reader, not general YAML parsing.
 Command hooks run with `${CLAUDE_PLUGIN_ROOT}` set to the installed plugin directory. String `command` handlers run through a login shell. When `args` is set (Claude Code exec form), or when `command` is a string array, Babelfish spawns the executable directly without a shell. Single-turn `prompt` handlers use the active OpenClaw agent and model when `plugins.entries.babelfish.llm` allows both agent and model overrides. Without those trust flags they are reported but not executed. Multi-turn `agent` handlers are unsupported.
 
 ## Codex
+
+Command expansion failures are isolated per hook. PreToolUse, UserPromptSubmit,
+and Stop append a blocking decision when a variable cannot be expanded, including
+when that is the only hook. Prior decisions, context, and argument rewrites are
+retained and later hooks still run. Observer expansion failures warn and continue.
+This policy applies to string and argv commands in both Codex and Claude Code;
+it does not change unrelated command or prompt execution-error handling.
 
 Babelfish reads `.codex-plugin/plugin.json`, declared or conventional skills, hooks, and MCP configuration. Manifest-inline hook declarations are supported. `${PLUGIN_ROOT}` is expanded for hook and MCP commands.
 
@@ -97,6 +110,11 @@ Restart OpenClaw after installing or removing a plugin. OpenClaw plugin metadata
 Use this mode only when an MCP client needs direct access to installed Hermes plugins without loading Babelfish as a native OpenClaw plugin. It starts a stdio MCP server that exposes available Hermes tools and commands, a read-only installed-plugin listing, and helpers for starting, checking, or stopping long-running Hermes calls. `babelfish_task_start` rejects a new start when eight isolated children still occupy slots, including after status is completed, failed, or stopped but the process has not exited.
 
 This mode covers Hermes plugins only. It does not provide Babelfish's native OpenClaw skills, hooks, middleware, or generated CLI commands.
+
+Hermes MCP command tools accept an optional string `args` field. Omitting the
+`arguments` object, passing `{}`, or passing `{ "args": "" }` sends an empty
+string to the command handler. Explicit text is preserved. This matches the
+default for command calls through `babelfish_task_start`.
 
 Configure an MCP client to launch:
 

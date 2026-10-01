@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { build } from "esbuild";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildHermesMcpToolIndex, createHermesMcpServer, MAX_RUNNING_TASKS } from "./mcp-server.js";
 import * as hermesPython from "./hermes-python.js";
@@ -118,6 +120,70 @@ async function stopTasksAndKill(
 }
 
 describe("Hermes MCP server", () => {
+  it("preserves optional command arguments through built stdio", { timeout: 30_000 }, async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-command-stdio-"));
+    const installDir = path.join(root, "plugins");
+    const runtime = path.join(root, "runtime");
+    const client = new Client({ name: "command-stdio-test", version: "0.0.0" });
+    try {
+      await copyFixture(installDir, "simple-hermes-plugin", "simple");
+      for (const file of ["python", "package.json"]) {
+        await fs.cp(path.join(process.cwd(), file), path.join(runtime, file), { recursive: true });
+      }
+      await build({
+        entryPoints: ["src/bin.ts"],
+        outfile: path.join(runtime, "dist", "bin.js"),
+        bundle: true,
+        external: ["@modelcontextprotocol/sdk/*"],
+        format: "esm",
+        packages: "bundle",
+        platform: "node",
+        banner: { js: "#!/usr/bin/env node" },
+      });
+      await fs.symlink(await fs.realpath("node_modules"), path.join(runtime, "node_modules"), "junction");
+      const transport = new StdioClientTransport({
+        command: process.execPath,
+        args: [path.join(runtime, "dist", "bin.js"), "mcp"],
+        env: {
+          PATH: process.env.PATH ?? "",
+          ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+          HOME: root,
+          USERPROFILE: root,
+          OPENCLAW_BABELFISH_ROOT: root,
+          OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR: installDir,
+          OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS: "10000",
+        },
+        stderr: "pipe",
+      });
+      await client.connect(transport);
+      const name = "babelfish_command__hermes__simple__simple";
+      for (const args of [undefined, {}, { args: "" }, { args: "explicit text" }]) {
+        const result = await client.callTool({ name, ...(args === undefined ? {} : { arguments: args }) });
+        expect(result.isError).toBeFalsy();
+        expect(JSON.parse(String(result.content?.[0]?.text))).toEqual({ command: args?.args ?? "" });
+      }
+      const started = await client.callTool({
+        name: "babelfish_task_start",
+        arguments: { kind: "command", plugin: "simple", name: "simple" },
+      });
+      expect(started.isError).toBeFalsy();
+      const task = JSON.parse(String(started.content?.[0]?.text));
+      let status = task;
+      for (let attempt = 0; attempt < 100 && status.status === "running"; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const result = await client.callTool({ name: "babelfish_task_status", arguments: { id: task.id } });
+        status = JSON.parse(String(result.content?.[0]?.text));
+      }
+      expect(status).toMatchObject({
+        status: "completed",
+        result: { plugin: "simple", command: "simple", result: { command: "" } },
+      });
+    } finally {
+      await client.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps unique tool names and prefixes collisions", () => {
     const index = buildHermesMcpToolIndex({
       installDir: "/tmp/hermes",
@@ -273,6 +339,14 @@ describe("Hermes MCP server", () => {
         }),
       ).resolves.toMatchObject({
         content: [{ type: "text", text: '{\n  "command": "from-command"\n}' }],
+      });
+      await expect(
+        client.callTool({
+          name: "babelfish_command__hermes__simple__simple",
+          arguments: {},
+        }),
+      ).resolves.toMatchObject({
+        content: [{ type: "text", text: '{\n  "command": ""\n}' }],
       });
 
       const started = await client.callTool({
