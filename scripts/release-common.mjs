@@ -51,7 +51,7 @@ export async function outputs(values) {
 export function validateStatement(statement, proof, repository) {
   assert.equal(statement._type, "https://in-toto.io/Statement/v1");
   assert.equal(statement.predicateType, "https://slsa.dev/provenance/v1");
-  assert.deepEqual(statement.subject, [{ name: `pkg:npm/${PACKAGE_NAME.replace("@", "%40")}@${PACKAGE_VERSION}`, digest: { sha512: proof.sha512 } }]);
+  assert.deepEqual(statement.subject, [{ name: `pkg:npm/${PACKAGE_NAME.replaceAll("@", "%40")}@${PACKAGE_VERSION}`, digest: { sha512: proof.sha512 } }]);
   const build = statement.predicate.buildDefinition;
   assert.equal(build.buildType, "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1");
   assert.deepEqual(build.externalParameters.workflow, { repository: REPOSITORY, path: WORKFLOW, ref: `refs/tags/${TAG}` });
