@@ -392,6 +392,78 @@ describe("native OpenClaw hook entry", () => {
       delete process.env.BABELFISH_TEST_HOOK_LOG;
     }
   }, 30_000); // Covers cold Python and multiple Windows supervisor launches.
+
+  it("keeps shell metacharacters in a quoted monitor workspace", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-shell-monitor-"));
+    const marker = path.join(root, "marker");
+    // A drive colon in the directory name is illegal on Windows. The relative
+    // form is still command substitution for /bin/sh, and cwd is the workspace.
+    const trick = process.platform === "win32" ? "proj$(touch marker)" : `proj$(touch ${marker})`;
+    const workspace = path.join(root, trick);
+    const plugin = path.join(root, "claude-code", "monitor-plugin");
+    const scriptPath = path.join(plugin, "echo-arg.cjs");
+    expect(marker).not.toMatch(/[\s'$]/);
+    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
+    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "empty-hermes"));
+    let hooks: Map<string, (event: unknown, ctx: unknown) => unknown> | undefined;
+    try {
+      await fs.mkdir(workspace, { recursive: true });
+      await fs.mkdir(path.join(root, "empty-hermes"), { recursive: true });
+      await fs.mkdir(path.join(plugin, ".claude-plugin"), { recursive: true });
+      await fs.mkdir(path.join(plugin, "monitors"), { recursive: true });
+      await fs.writeFile(scriptPath, "process.stdout.write(String(process.argv[2] ?? '') + '\\n');\n");
+      const command = [
+        JSON.stringify(process.execPath),
+        JSON.stringify(scriptPath),
+        '"${CLAUDE_PROJECT_DIR}"',
+      ].join(" ");
+      await fs.writeFile(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "monitor-plugin" }));
+      await fs.writeFile(path.join(plugin, "monitors", "monitors.json"), JSON.stringify([
+        { name: "status", description: "Status", command },
+      ]));
+      vi.resetModules();
+      const entry = (await import("./index.js")).default;
+      hooks = new Map();
+      entry.register({
+        on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => { hooks.set(name, handler); },
+        registerTool: () => undefined,
+        registerCommand: () => undefined,
+        registerCli: () => undefined,
+        registerAgentToolResultMiddleware: () => undefined,
+        logger: { warn: () => undefined },
+      });
+      await hooks.get("session_start")?.(
+        { sessionId: "shell-monitor" },
+        { sessionId: "shell-monitor", workspaceDir: workspace },
+      );
+      await vi.waitFor(async () => {
+        await expect(hooks.get("agent_turn_prepare")?.({}, { sessionId: "shell-monitor" })).resolves.toEqual({
+          prependContext: `Status: ${workspace}`,
+        });
+      }, { timeout: 5000 });
+      await expect(fs.stat(marker)).rejects.toThrow();
+    } finally {
+      await hooks?.get("session_end")?.({ sessionId: "shell-monitor" }, { sessionId: "shell-monitor" });
+      vi.unstubAllEnvs();
+      let removed = false;
+      for (let attempt = 0; attempt < 20 && !removed; attempt += 1) {
+        try {
+          await fs.rm(root, { recursive: true, force: true });
+          removed = true;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
+            throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      if (!removed) {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+      await fs.rm(marker, { force: true });
+    }
+  }, 20_000);
 });
 
 describe("Stop hook finalization", () => {

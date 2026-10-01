@@ -307,6 +307,113 @@ process.exitCode = ${code};
     }
   }, 30_000);
 
+  it.each([
+    ["command substitution", (marker: string) => `$(touch ${marker})`],
+    ...(process.platform === "win32"
+      ? []
+      : [["a broken double quote", (marker: string) => `x"; touch ${marker}; echo "`]]),
+  ])("keeps %s inside a quoted string hook variable", async (_label, payloadFor) => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-shell-hook-"));
+    const plugin = path.join(rootDir, "codex", "fixture");
+    const capturePath = path.join(rootDir, "capture.cjs");
+    const outputPath = path.join(rootDir, "output.txt");
+    const marker = path.join(rootDir, "marker");
+    const payload = payloadFor(marker);
+    const previous = process.env.CLAUDE_PROJECT_DIR;
+    process.env.CLAUDE_PROJECT_DIR = payload;
+    try {
+      expect(marker).not.toMatch(/[\s'$]/);
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      await fs.writeFile(capturePath, "const fs=require('node:fs'); fs.writeFileSync(process.argv[2], process.argv[3] ?? '');\n");
+      const command = [
+        JSON.stringify(process.execPath),
+        JSON.stringify(capturePath),
+        JSON.stringify(outputPath),
+        '"${CLAUDE_PROJECT_DIR}"',
+      ].join(" ");
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
+      }));
+      await invokeBundleHooks({
+        rootDir,
+        installDir: path.join(rootDir, "hermes"),
+        python: "python3",
+        timeoutMs: fixtureTimeoutMs,
+        env: {},
+      }, "PreToolUse", {});
+      await expect(fs.stat(marker)).rejects.toThrow();
+      await expect(fs.readFile(outputPath, "utf8")).resolves.toBe(payload);
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_PROJECT_DIR;
+      else process.env.CLAUDE_PROJECT_DIR = previous;
+      await fs.rm(rootDir, { recursive: true, force: true });
+      await fs.rm(marker, { force: true });
+    }
+  }, 20_000);
+
+  it.skipIf(process.platform === "win32")("still blocks a single-quoted denying guard", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-single-quote-"));
+    const plugin = path.join(rootDir, "codex", "fixture");
+    const previous = process.env.BABELFISH_TEST_FLAG;
+    process.env.BABELFISH_TEST_FLAG = "deny";
+    try {
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      const command = "if [ '${BABELFISH_TEST_FLAG}' = deny ]; then exit 2; fi; exit 0";
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
+      }));
+      const config = {
+        rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
+        timeoutMs: fixtureTimeoutMs, env: {},
+      };
+      await expect(invokeBundleHooks(config, "PreToolUse", {})).resolves.toEqual([
+        { decision: "block", reason: expect.any(String) },
+      ]);
+      process.env.BABELFISH_TEST_FLAG = "allow";
+      await expect(invokeBundleHooks(config, "PreToolUse", {})).resolves.toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.BABELFISH_TEST_FLAG;
+      else process.env.BABELFISH_TEST_FLAG = previous;
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("does not execute a quote hidden in a single-quoted variable", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-single-break-"));
+    const plugin = path.join(rootDir, "codex", "fixture");
+    const marker = path.join(rootDir, "marker");
+    const capturePath = path.join(rootDir, "capture.cjs");
+    const outputPath = path.join(rootDir, "output.txt");
+    const payload = `x'; touch ${marker}; echo '`;
+    const previous = process.env.BABELFISH_TEST_FLAG;
+    process.env.BABELFISH_TEST_FLAG = payload;
+    try {
+      expect(marker).not.toMatch(/[\s'$]/);
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      await fs.writeFile(capturePath, "const fs=require('node:fs'); fs.writeFileSync(process.argv[2], process.argv[3] ?? '');\n");
+      const command = [
+        JSON.stringify(process.execPath),
+        JSON.stringify(capturePath),
+        JSON.stringify(outputPath),
+        "'${BABELFISH_TEST_FLAG}'",
+      ].join(" ");
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
+      }));
+      await invokeBundleHooks({
+        rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
+        timeoutMs: fixtureTimeoutMs, env: {},
+      }, "PreToolUse", {});
+      await expect(fs.stat(marker)).rejects.toThrow();
+      await expect(fs.readFile(outputPath, "utf8")).resolves.toBe(payload);
+    } finally {
+      if (previous === undefined) delete process.env.BABELFISH_TEST_FLAG;
+      else process.env.BABELFISH_TEST_FLAG = previous;
+      await fs.rm(rootDir, { recursive: true, force: true });
+      await fs.rm(marker, { force: true });
+    }
+  });
+
   it("preserves earlier decisions, context, rewrites and later hooks after expansion failure", async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-unset-hook-"));
     const plugin = path.join(rootDir, "codex", "fixture");

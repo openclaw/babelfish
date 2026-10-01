@@ -20,7 +20,7 @@ Bundle paths must stay inside the plugin root, including after resolving skill-r
 | Command-hook process output | N/A | 1 MiB per stream | 1 MiB per stream | Codex and Claude Code command hooks are terminated and reported as failed if stdout or stderr exceeds the limit |
 | Command-hook process stdin | N/A | 1 MiB payload | 1 MiB payload | Oversized events do not start command hooks. Observer hooks are skipped; PreToolUse, UserPromptSubmit, and Stop return blocking decisions. |
 | Hook-file discovery | N/A | 50 unique files, depth 8 | 50 unique files, depth 8 | One file budget is shared across declared paths; overlapping files count once. Excess files or directory depth fail discovery. |
-| Command-hook invocation | N/A | String shell or exec `args` | String shell or exec `args` | String `command` runs via `/bin/sh -lc` (Windows uses `cmd.exe`). `args` or a `command` array spawn the executable without shell parsing. Both forms retain Windows Job supervision and process-tree cleanup. Plugin install is trusted code execution. |
+| Command-hook invocation | N/A | String shell or exec `args` | String shell or exec `args` | String `command` runs via `/bin/sh -lc` (Windows uses `cmd.exe`). `/bin/sh` expands braced `${...}` names in that text. Windows rewrites them to `%NAME%` for `cmd.exe`. `args` or a `command` array spawn the executable without shell parsing. Both forms retain Windows Job supervision and process-tree cleanup. Plugin install is trusted code execution. |
 | Plugin-defined agents | N/A | N/A | Partial | Imported as user-only skills; model and tool isolation are not preserved |
 | Pre-tool command hooks | Full | Full | Full | Blocks and argument rewrites map to OpenClaw's pre-tool hook |
 | Permission command hooks | N/A | No | No | OpenClaw has no equivalent approval-boundary event |
@@ -37,7 +37,7 @@ Bundle paths must stay inside the plugin root, including after resolving skill-r
 | LLM/request/execution middleware | Partial | N/A | N/A | Request rewrites of OpenClaw system/context fields map to prompt-build hooks; provider and execution wrappers are reported but not run |
 | Codex app connectors | N/A | No | N/A | Connector IDs are not MCP servers and have no current equivalent |
 | LSP servers | N/A | N/A | No | Detected but not started |
-| Monitors | N/A | N/A | Partial | Always-on monitors run for the session and queue bounded stdout context; skill-triggered monitors are listed only |
+| Monitors | N/A | N/A | Partial | Always-on monitors run for the session and queue bounded stdout context; `${CLAUDE_PROJECT_DIR}` is the session workspace and is expanded by the shell. Skill-triggered monitors are listed only |
 | Output styles | N/A | N/A | Partial | Imported as user-only skills |
 | Plugin settings/default agent | N/A | N/A | No | No native Babelfish mapping exists |
 | Supporting scripts, binaries, and assets | Full | Full | Full | Retained when referenced by an imported skill, hook, or MCP server |
@@ -61,7 +61,7 @@ removes trailing breaks, and keep retains them, including before the Markdown
 closing delimiter. LF and CRLF headers work without altering copied skill body
 bytes or support files. This is a scalar reader, not general YAML parsing.
 
-Command hooks run with `${CLAUDE_PLUGIN_ROOT}` set to the installed plugin directory. String `command` handlers run through a login shell. When `args` is set (Claude Code exec form), or when `command` is a string array, Babelfish spawns the executable directly without a shell. Single-turn `prompt` handlers use the active OpenClaw agent and model when `plugins.entries.babelfish.llm` allows both agent and model overrides. Without those trust flags they are reported but not executed. Multi-turn `agent` handlers are unsupported.
+Command hooks run with `${CLAUDE_PLUGIN_ROOT}` and `${PLUGIN_ROOT}` set to the installed plugin directory. String `command` handlers keep `${...}` references that are bare or inside double quotes, and `/bin/sh` expands those so the quotes apply to the value. A reference inside single quotes is inserted by Babelfish, with any single quote in the value escaped, so an installed comparison such as `'${FLAG}'` still sees the value and the value cannot end the quote. An unset referenced name still fails that hook before spawn. On Windows, remaining `${NAME}` references are rewritten to `%NAME%` and `cmd.exe` inserts the raw value. When `args` is set (Claude Code exec form), or when `command` is a string array, Babelfish substitutes each argument and spawns the executable directly without a shell. Single-turn `prompt` handlers use the active OpenClaw agent and model when `plugins.entries.babelfish.llm` allows both agent and model overrides. Without those trust flags they are reported but not executed. Multi-turn `agent` handlers are unsupported.
 
 ## Codex
 
@@ -72,7 +72,7 @@ retained and later hooks still run. Observer expansion failures warn and continu
 This policy applies to string and argv commands in both Codex and Claude Code;
 it does not change unrelated command or prompt execution-error handling.
 
-Babelfish reads `.codex-plugin/plugin.json`, declared or conventional skills, hooks, and MCP configuration. Manifest-inline hook declarations are supported. `${PLUGIN_ROOT}` is expanded for hook and MCP commands.
+Babelfish reads `.codex-plugin/plugin.json`, declared or conventional skills, hooks, and MCP configuration. Manifest-inline hook declarations are supported. `${PLUGIN_ROOT}` is available to string hook commands through the shell, and it is substituted into MCP server arguments.
 
 Codex app connector IDs are not MCP servers and have no equivalent Babelfish runtime surface.
 
