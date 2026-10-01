@@ -45,6 +45,12 @@ Bundle paths must stay inside the plugin root, including after resolving skill-r
 
 ## Claude Code
 
+For installed Claude Code and Codex Stop hooks, upgrading changes
+`continue: false` from requesting revision to finishing the turn. Precedence is
+per hook: a separate hook's block still requests revision in either order.
+Exit-2 and oversized-input Stop decisions also still request revision.
+Pre-tool and prompt hooks continue to treat `continue: false` as blocking.
+
 Babelfish reads `.claude-plugin/plugin.json`, declared or conventional skill, command, agent, output-style, hook, and MCP paths. Existing `SKILL.md` directories are copied intact. Markdown commands, agents, and output styles are converted to user-invoked OpenClaw skills.
 
 Command hooks run with `${CLAUDE_PLUGIN_ROOT}` set to the installed plugin directory. String `command` handlers run through a login shell. When `args` is set (Claude Code exec form), or when `command` is a string array, Babelfish spawns the executable directly without a shell. Single-turn `prompt` handlers use the active OpenClaw agent and model when `plugins.entries.babelfish.llm` allows both agent and model overrides. Without those trust flags they are reported but not executed. Multi-turn `agent` handlers are unsupported.

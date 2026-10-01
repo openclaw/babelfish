@@ -290,21 +290,30 @@ describe("native OpenClaw hook entry", () => {
 });
 
 describe("Stop hook finalization", () => {
-  async function finalize(decision: Record<string, unknown>) {
+  async function finalize(
+    decision: Record<string, unknown> | Record<string, unknown>[],
+    options: { event?: Record<string, unknown>; hookEvent?: string; exitCode?: number } = {},
+  ) {
     const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-stop-hermes-"));
     const bundleRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-stop-root-"));
     const previous = process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR;
     const previousRoot = process.env.OPENCLAW_BABELFISH_ROOT;
     const pluginRoot = path.join(bundleRoot, "codex", "stop-hooks");
     await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
-    await fs.writeFile(
-      path.join(pluginRoot, "hook.mjs"),
-      `let input=""; process.stdin.on("data", (chunk) => { input += chunk; }); process.stdin.on("end", () => { console.log(${JSON.stringify(JSON.stringify(decision))}); });`,
-    );
+    const decisions = Array.isArray(decision) ? decision : [decision];
+    for (const [index, result] of decisions.entries()) {
+      await fs.writeFile(
+        path.join(pluginRoot, `hook-${index}.mjs`),
+        `process.stdin.resume(); process.stdin.on("end", () => { console.log(${JSON.stringify(JSON.stringify(result))}); process.exitCode = ${options.exitCode ?? 0}; });`,
+      );
+    }
     await fs.writeFile(
       path.join(pluginRoot, ".codex-plugin", "plugin.json"),
       JSON.stringify({
-        hooks: { Stop: [{ hooks: [{ type: "command", command: "node hook.mjs" }] }] },
+        hooks: { [options.hookEvent ?? "Stop"]: [{ hooks: decisions.map((_, index) => ({
+          type: "command",
+          command: [process.execPath, `hook-${index}.mjs`],
+        })) }] },
       }),
     );
     process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR = installDir;
@@ -323,7 +332,10 @@ describe("Stop hook finalization", () => {
         registerAgentToolResultMiddleware: () => undefined,
         logger: { warn: () => undefined },
       });
-      return await hooks.get("before_agent_finalize")?.({}, {});
+      const handler = options.hookEvent === "PreToolUse" ? "before_tool_call"
+        : options.hookEvent === "UserPromptSubmit" ? "before_agent_run"
+        : "before_agent_finalize";
+      return await hooks.get(handler)?.(options.event ?? {}, {});
     } finally {
       if (previous === undefined) delete process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR;
       else process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR = previous;
@@ -353,5 +365,41 @@ describe("Stop hook finalization", () => {
       reason: "keep going",
       stopReason: "halt",
     })).resolves.toBeUndefined();
+  });
+
+  it.each([false, true])("retains a separate Stop block (block first: %s)", async (blockFirst) => {
+    const decisions = [
+      { continue: false, stopReason: "finished" },
+      { decision: "block", reason: "separate guard" },
+    ];
+    await expect(finalize(blockFirst ? decisions.reverse() : decisions)).resolves.toEqual({
+      action: "revise",
+      reason: "separate guard",
+      retry: { instruction: "separate guard" },
+    });
+  });
+
+  it("retains revision for exit-2 Stop hooks", async () => {
+    await expect(finalize({ continue: false }, { exitCode: 2 })).resolves.toMatchObject({
+      action: "revise",
+      reason: expect.stringContaining("Stop hook"),
+    });
+  });
+
+  it("retains revision for oversized Stop input", async () => {
+    await expect(finalize({ continue: false }, {
+      event: { text: "x".repeat(1024 * 1024) },
+    })).resolves.toMatchObject({
+      action: "revise",
+      reason: expect.stringContaining("1048576-byte payload limit"),
+    });
+  });
+
+  it.each(["PreToolUse", "UserPromptSubmit"])("still blocks %s for continue false", async (hookEvent) => {
+    await expect(finalize({ continue: false, stopReason: "halt" }, { hookEvent })).resolves.toEqual(
+      hookEvent === "PreToolUse"
+        ? { block: true, blockReason: "halt" }
+        : { outcome: "block", reason: "halt", message: "halt" },
+    );
   });
 });

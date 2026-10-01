@@ -45,6 +45,7 @@ Installing an already installed name requires `--force`; a rejected duplicate le
 | Prompt and terminal commands | User-invoked skills or top-level CLI commands when the source format supports them |
 | Compatible hooks | Matching lifecycle, prompt, tool, compaction, and subagent hooks. Discovery permits 50 unique hook files and eight nested directories. Command-hook stdin is capped at 1 MiB; oversized decision events fail closed. String commands use a login shell; `args` or a `command` array spawn without a shell. |
 | Compatible middleware | Matching prompt-build and tool-result middleware |
+| Stop hook decisions | On upgrade, installed Claude Code and Codex Stop hooks with `continue: false` finish the turn rather than request revision. This takes precedence over a block on the same hook only; a separate blocking hook still requests revision in either order. Pre-tool and prompt blocking is unchanged. |
 | Unsupported behavior | Recorded during generation and reported at Gateway startup |
 
 Support differs by source app and surface. See the [compatibility reference](docs/compatibility.md) for the full matrix, source-specific behavior, configuration, and example plugins.
