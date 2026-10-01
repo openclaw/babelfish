@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspectTarball, PACKAGE_NAME, PACKAGE_VERSION, REPOSITORY } from "./package-archive.mjs";
-import { boundedFetch, github, outputs, pages, REPO, TAG, validateStatement, WORKFLOW } from "./release-common.mjs";
+import { admitReleaseJobs, boundedFetch, github, outputs, pages, REPO, TAG, validateStatement, WORKFLOW } from "./release-common.mjs";
 
 assert.equal(process.version, "v26.10.0");
 assert.equal(execFileSync("npm", ["--version"], { encoding: "utf8" }).trim(), "11.19.1");
@@ -74,12 +74,12 @@ await npmRequire("sigstore").verify(bundle, {
 const statement = JSON.parse(Buffer.from(bundle.dsseEnvelope.payload, "base64").toString("utf8"));
 const publishingAttempt = validateStatement(statement, proof, repository);
 const jobs = await pages(`actions/runs/${proof.runId}/attempts/${publishingAttempt}/jobs`, "jobs");
-const publisher = jobs.find((job) => job.name === "Publish immutable npm package");
-assert(publisher?.head_sha === proof.source);
-const publishStep = publisher.steps.find((step) => step.name === "Publish or reconcile immutable bytes");
-assert(publishStep?.started_at && publishStep.conclusion !== "skipped", "publishing invocation admitted by attempt-specific job");
-const builder = jobs.find((job) => job.name === "Validate and retain package");
-assert(builder?.conclusion === "success", "publishing attempt passed source and immutable artifact gates");
+assert.equal(proof.buildAttempt, 1);
+const validationJobs = [...jobs];
+for (let attempt = 1; attempt < publishingAttempt; attempt += 1) {
+  validationJobs.push(...await pages(`actions/runs/${proof.runId}/attempts/${attempt}/jobs`, "jobs"));
+}
+admitReleaseJobs(jobs, validationJobs, proof);
 const distTags = JSON.parse((await boundedFetch("https://registry.npmjs.org/-/package/@openclaw%2fbabelfish/dist-tags")).toString("utf8"));
 assert.equal(distTags.latest, PACKAGE_VERSION);
 const result = {

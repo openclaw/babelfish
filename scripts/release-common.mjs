@@ -67,3 +67,15 @@ export function validateStatement(statement, proof, repository) {
   assert(Number.isSafeInteger(attempt) && attempt >= 1 && attempt <= Number(process.env.GITHUB_RUN_ATTEMPT), "admitted publishing attempt");
   return attempt;
 }
+
+export function admitReleaseJobs(publishingJobs, validationJobs, proof) {
+  const publisher = publishingJobs.find((job) => job.name === "Publish immutable npm package");
+  assert(publisher?.head_sha === proof.source);
+  const publishStep = publisher.steps.find((step) => step.name === "Publish or reconcile immutable bytes");
+  assert(publishStep?.started_at && publishStep.conclusion !== "skipped", "publishing invocation admitted by attempt-specific job");
+  assert(validationJobs.some((job) =>
+    job.name === "Validate and retain package" && job.head_sha === proof.source && job.conclusion === "success" &&
+    Date.parse(job.completed_at) <= Date.parse(publishStep.started_at) &&
+    job.steps.some((step) => step.name === "Admit exact artifact identity and bytes" && step.conclusion === "success")),
+  "successful retained-artifact admission before publication");
+}

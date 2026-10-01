@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { gzipSync } from "node:zlib";
 import fs from "node:fs";
 import { inspectTarball } from "../scripts/package-archive.mjs";
-import { validateStatement } from "../scripts/release-common.mjs";
+import { admitReleaseJobs, validateStatement } from "../scripts/release-common.mjs";
 
 function tarball(overrides: Record<string, unknown> = {}, extra?: { name: string; type: string }) {
   const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -87,5 +87,26 @@ describe("release provenance identity", () => {
     if (field === "attempt") value.predicate.runDetails.metadata.invocationId = "https://github.com/openclaw/babelfish/actions/runs/123/attempts/3";
     if (field === "event") value.predicate.buildDefinition.internalParameters.github.event_name = "workflow_dispatch";
     expect(() => validateStatement(value, proof, repository)).toThrow();
+  });
+});
+
+describe("failed-job publication retry admission", () => {
+  const proof = { source: "a".repeat(40) };
+  const publisher = { name: "Publish immutable npm package", head_sha: proof.source, steps: [{ name: "Publish or reconcile immutable bytes", started_at: "2026-10-01T10:10:00Z", conclusion: "success" }] };
+  const builder = { name: "Validate and retain package", head_sha: proof.source, conclusion: "success", completed_at: "2026-10-01T10:00:00Z", steps: [{ name: "Admit exact artifact identity and bytes", conclusion: "success" }] };
+  it("accepts an earlier successful build when only failed publisher jobs rerun", () => {
+    expect(() => admitReleaseJobs([publisher], [builder], proof)).not.toThrow();
+  });
+  it.each([
+    { ...builder, conclusion: "failure" },
+    { ...builder, head_sha: "b".repeat(40) },
+    { ...builder, completed_at: "2026-10-01T10:20:00Z" },
+    { ...builder, steps: [{ name: "Admit exact artifact identity and bytes", conclusion: "failure" }] },
+  ])("rejects missing, late, or mismatched artifact admission", (validation) => {
+    expect(() => admitReleaseJobs([publisher], [validation], proof)).toThrow();
+  });
+  it("rejects an unattempted or different-head publisher", () => {
+    expect(() => admitReleaseJobs([{ ...publisher, head_sha: "b".repeat(40) }], [builder], proof)).toThrow();
+    expect(() => admitReleaseJobs([{ ...publisher, steps: [{ ...publisher.steps[0], conclusion: "skipped" }] }], [builder], proof)).toThrow();
   });
 });

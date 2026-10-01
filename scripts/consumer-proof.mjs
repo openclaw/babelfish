@@ -28,7 +28,7 @@ if (process.argv[2] !== "--worker") {
     HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
     TMPDIR: root, TMP: root, TEMP: root, XDG_CONFIG_HOME: home, XDG_STATE_HOME: home,
     npm_config_userconfig: config, npm_config_globalconfig: globalConfig,
-    npm_config_cache: path.join(root, "cache"), npm_config_registry: "https://registry.npmjs.org/",
+    npm_config_cache: process.env.BABELFISH_CONSUMER_CACHE || path.join(root, "cache"), npm_config_registry: "https://registry.npmjs.org/",
     GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: config,
     OPENCLAW_BABELFISH_ROOT: path.join(root, "state"),
     OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR: path.join(root, "state", "hermes"),
