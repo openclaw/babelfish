@@ -8,6 +8,44 @@ async function copyFixture(target: string): Promise<void> {
 }
 
 describe("native OpenClaw hook entry", () => {
+  it.each([
+    ["PreToolUse", "before_tool_call", { block: true }],
+    ["UserPromptSubmit", "before_agent_run", { outcome: "block" }],
+    ["Stop", "before_agent_finalize", { action: "revise" }],
+  ] as const)("blocks failed %s expansion through the registered handler", async (eventName, handlerName, expected) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-failed-guard-"));
+    const plugin = path.join(root, "codex", "guard");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
+    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "hermes"));
+    vi.stubEnv("BABELFISH_TEST_UNSET", undefined);
+    try {
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: { [eventName]: [{ hooks: [{ type: "command", command: "node ${BABELFISH_TEST_UNSET}" }] }] },
+      }));
+      vi.resetModules();
+      const entry = (await import("./index.js")).default;
+      const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+      entry.register({
+        on: (name, handler) => { hooks.set(name, handler); },
+        registerTool: () => undefined,
+        registerCommand: () => undefined,
+        registerCli: () => undefined,
+        registerAgentToolResultMiddleware: () => undefined,
+        logger: { warn: () => undefined },
+      });
+      const result = await hooks.get(handlerName)?.({ toolName: "fixture" }, {});
+      expect(result).toMatchObject(expected);
+      expect(JSON.stringify(result)).toContain("command expansion failed");
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("BABELFISH_TEST_UNSET"));
+    } finally {
+      vi.unstubAllEnvs();
+      warn.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("registers hooks and maps Hermes pre_tool_call blocks", async () => {
     const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-native-"));
     await copyFixture(installDir);

@@ -803,9 +803,19 @@ export async function invokeBundleHooks(
         }
         continue;
       }
+      let command: ReturnType<typeof expandHookCommand>;
+      try {
+        command = expandHookCommand(hook, plugin.path);
+      } catch (error) {
+        const reason = `Babelfish hook ${plugin.key}/${event} command expansion failed: ${(error as Error).message}`;
+        console.warn(reason);
+        if (DECISION_HOOK_EVENTS.has(event)) {
+          results.push({ decision: "block", reason });
+        }
+        continue;
+      }
       let output: Awaited<ReturnType<typeof runHookCommand>>;
       try {
-        const command = expandHookCommand(hook, plugin.path);
         output = await runHookCommand(command, plugin.path, currentPayload, hook.timeoutMs);
       } catch (error) {
         console.warn(`Babelfish hook ${plugin.key}/${event} failed: ${(error as Error).message}`);

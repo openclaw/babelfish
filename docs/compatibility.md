@@ -51,6 +51,13 @@ Command hooks run with `${CLAUDE_PLUGIN_ROOT}` set to the installed plugin direc
 
 ## Codex
 
+Command expansion failures are isolated per hook. PreToolUse, UserPromptSubmit,
+and Stop append a blocking decision when a variable cannot be expanded, including
+when that is the only hook. Prior decisions, context, and argument rewrites are
+retained and later hooks still run. Observer expansion failures warn and continue.
+This policy applies to string and argv commands in both Codex and Claude Code;
+it does not change unrelated command or prompt execution-error handling.
+
 Babelfish reads `.codex-plugin/plugin.json`, declared or conventional skills, hooks, and MCP configuration. Manifest-inline hook declarations are supported. `${PLUGIN_ROOT}` is expanded for hook and MCP commands.
 
 Codex app connector IDs are not MCP servers and have no equivalent Babelfish runtime surface.

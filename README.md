@@ -45,6 +45,7 @@ Installing an already installed name requires `--force`; a rejected duplicate le
 | Prompt and terminal commands | User-invoked skills or top-level CLI commands when the source format supports them |
 | Compatible hooks | Matching lifecycle, prompt, tool, compaction, and subagent hooks. Discovery permits 50 unique hook files and eight nested directories. Command-hook stdin is capped at 1 MiB; oversized decision events fail closed. String commands use a login shell; `args` or a `command` array spawn without a shell. |
 | Compatible middleware | Matching prompt-build and tool-result middleware |
+| Hook command expansion | An unresolved variable blocks PreToolUse, UserPromptSubmit, and Stop decisions while preserving earlier results and running later hooks. Observer expansion failures warn and continue. Execution-error handling is unchanged. |
 | Unsupported behavior | Recorded during generation and reported at Gateway startup |
 
 Support differs by source app and surface. See the [compatibility reference](docs/compatibility.md) for the full matrix, source-specific behavior, configuration, and example plugins.
