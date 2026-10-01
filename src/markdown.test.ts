@@ -1,5 +1,13 @@
 import { readFrontmatterScalar, splitFrontmatter } from "./markdown.js";
 
+it("preserves next-line scalar metadata without consuming a following key", () => {
+  expect(readFrontmatterScalar("keep-coding-instructions:\n  true\nnext: kept\n", "keep-coding-instructions"))
+    .toEqual({ value: "true", consumed: [0, 1] });
+  expect(readFrontmatterScalar("description:\n\n  'next-line description'\nnext: kept\n", "description"))
+    .toEqual({ value: "next-line description", consumed: [0, 1, 2] });
+  expect(readFrontmatterScalar("description:\nnext: kept\n", "description")).toBeUndefined();
+});
+
 describe("splitFrontmatter", () => {
   it("retains body bytes while normalizing frontmatter line endings", () => {
     expect(splitFrontmatter("---\r\nname: demo\r\ndescription: Demo\r\n---\r\nBody.\r\n"))

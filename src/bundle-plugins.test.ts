@@ -370,7 +370,7 @@ process.exitCode = ${code};
     await fs.mkdir(path.join(root, "output-styles"));
     await fs.writeFile(
       path.join(root, "output-styles", "brief.md"),
-      ["---", "name: Brief", "description: Keep replies short", "keep-coding-instructions: true", "---", "Answer in three sentences."].join(eol),
+      ["---", "name: Brief", "description: Keep replies short", "keep-coding-instructions:", "  true", "---", "Answer in three sentences."].join(eol),
     );
     const plugin = await inspectBundlePlugin("claude-code", root);
     expect(plugin.outputStyles).toEqual([{

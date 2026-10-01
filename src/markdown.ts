@@ -23,7 +23,16 @@ export function readFrontmatterScalar(
     const header = /^([|>])(?:([-+])([1-9])?|([1-9])([-+])?)?(?:[ \t]+#.*)?$/.exec(raw);
     if (!header) {
       if (/^[|>]/.test(raw)) throw new Error(`Invalid block scalar header for ${name}`);
-      if (!raw) return undefined;
+      if (!raw) {
+        let cursor = index + 1;
+        while (cursor < lines.length && !lines[cursor]?.trim()) cursor += 1;
+        const continuation = lines[cursor];
+        if (!continuation || !/^[ \t]+\S/.test(continuation)) return undefined;
+        return {
+          value: continuation.trim().replace(/^['"]|['"]$/g, ""),
+          consumed: Array.from({ length: cursor - index + 1 }, (_, offset) => index + offset),
+        };
+      }
       return { value: raw.replace(/^['"]|['"]$/g, ""), consumed: [index] };
     }
     const indicator = header[3] ?? header[4];
