@@ -1,0 +1,302 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v0.1.1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: 26.10.0
+  GITHUB_REF_PROTECTED: ${{ github.ref_protected }}
+
+jobs:
+  build:
+    name: Validate and retain package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      artifact_id: ${{ steps.admit.outputs.artifact_id }}
+      artifact_digest: ${{ steps.admit.outputs.artifact_digest }}
+      source: ${{ steps.admit.outputs.source }}
+      tag_object: ${{ steps.admit.outputs.tag_object }}
+      size: ${{ steps.admit.outputs.size }}
+      sha256: ${{ steps.admit.outputs.sha256 }}
+      sha512: ${{ steps.admit.outputs.sha512 }}
+      integrity: ${{ steps.admit.outputs.integrity }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Verify source and discover retained artifact
+        id: discover
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-source.mjs discover
+      - name: Reuse immutable artifact
+        if: steps.discover.outputs.reuse == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.discover.outputs.artifact_id }}
+          path: release-artifacts
+          digest-mismatch: error
+      - name: Build, check, pack, and prove fresh consumer once
+        if: steps.discover.outputs.reuse == 'false'
+        run: |
+          test "$(npm --version)" = 11.19.1
+          npm ci
+          npm run check
+          npm run pack:check -- --out release-artifacts
+      - name: Seal release evidence
+        if: steps.discover.outputs.reuse == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-source.mjs seal release-artifacts
+      - name: Retain one immutable package artifact
+        if: steps.discover.outputs.reuse == 'false'
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-package-${{ github.run_id }}
+          path: release-artifacts/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 90
+          compression-level: 0
+      - name: Admit exact artifact identity and bytes
+        id: admit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.discover.outputs.artifact_id || steps.upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.discover.outputs.artifact_digest || steps.upload.outputs.artifact-digest }}
+        run: node scripts/release-source.mjs admit release-artifacts
+
+  publish:
+    name: Publish immutable npm package
+    needs: build
+    if: github.ref_protected
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: stable-release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: ${{ runner.temp }}/npm-artifact
+          digest-mismatch: error
+      - name: Publish or reconcile immutable bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact_digest }}
+          SOURCE: ${{ needs.build.outputs.source }}
+          TAG_OBJECT: ${{ needs.build.outputs.tag_object }}
+          TAR_SIZE: ${{ needs.build.outputs.size }}
+          TAR_SHA256: ${{ needs.build.outputs.sha256 }}
+          TAR_SHA512: ${{ needs.build.outputs.sha512 }}
+          TAR_INTEGRITY: ${{ needs.build.outputs.integrity }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = v26.10.0
+          test "$(npm --version)" = 11.19.1
+          mkdir "${RUNNER_TEMP}/npm-empty" "${RUNNER_TEMP}/npm-home"
+          touch "${RUNNER_TEMP}/npm-user.npmrc" "${RUNNER_TEMP}/npm-global.npmrc"
+          export HOME="${RUNNER_TEMP}/npm-home"
+          export NPM_CONFIG_USERCONFIG="${RUNNER_TEMP}/npm-user.npmrc"
+          export NPM_CONFIG_GLOBALCONFIG="${RUNNER_TEMP}/npm-global.npmrc"
+          export NPM_CONFIG_CACHE="${RUNNER_TEMP}/npm-home/cache"
+          export NPM_CONFIG_IGNORE_SCRIPTS=true
+          cd "${RUNNER_TEMP}/npm-empty"
+          python3 - <<'PY'
+          import gzip, hashlib, io, json, os, pathlib, re, subprocess, tarfile, time, urllib.request
+          env = os.environ
+          assert env["GITHUB_REF_PROTECTED"] == "true"
+          assert env["GITHUB_REPOSITORY"] == "openclaw/babelfish"
+          assert env["GITHUB_REF"] == "refs/tags/v0.1.1"
+          assert env["GITHUB_SHA"] == env["SOURCE"]
+          assert not any(env.get(key) for key in ["NPM_TOKEN", "NODE_AUTH_TOKEN", "NPM_CONFIG_PROVENANCE_FILE"])
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, message, headers, url):
+                  raise RuntimeError("Redirect refused")
+          opener = urllib.request.build_opener(NoRedirect)
+          def get(url, token=False, limit=2*1024*1024):
+              headers = {"Accept": "application/json"}
+              if token:
+                  assert url.startswith("https://api.github.com/repos/openclaw/babelfish/")
+                  headers["Authorization"] = "Bearer " + env["GH_TOKEN"]
+              with opener.open(urllib.request.Request(url, headers=headers), timeout=30) as response:
+                  assert response.geturl() == url
+                  data = response.read(limit + 1)
+                  assert len(data) <= limit
+                  return data
+          api = "https://api.github.com/repos/openclaw/babelfish/"
+          artifact = json.loads(get(api + "actions/artifacts/" + env["ARTIFACT_ID"], True))
+          assert artifact["digest"] == env["ARTIFACT_DIGEST"] and not artifact["expired"]
+          assert artifact["name"] == "npm-package-" + env["GITHUB_RUN_ID"]
+          assert str(artifact["workflow_run"]["id"]) == env["GITHUB_RUN_ID"]
+          assert artifact["workflow_run"]["head_sha"] == env["SOURCE"]
+          directory = pathlib.Path(env["RUNNER_TEMP"]) / "npm-artifact"
+          proof = json.loads((directory / "package-proof.json").read_text())
+          assert proof["filename"] == "openclaw-babelfish-0.1.1.tgz"
+          assert proof["source"] == env["SOURCE"] and proof["tagObject"] == env["TAG_OBJECT"]
+          assert proof["runId"] == env["GITHUB_RUN_ID"] and proof["buildAttempt"] == 1
+          tarball = directory / proof["filename"]
+          assert tarball.is_file() and not tarball.is_symlink()
+          assert 0 < tarball.stat().st_size == int(env["TAR_SIZE"]) <= 8*1024*1024
+          data = tarball.read_bytes()
+          assert hashlib.sha256(data).hexdigest() == env["TAR_SHA256"] == proof["sha256"]
+          assert hashlib.sha512(data).hexdigest() == env["TAR_SHA512"] == proof["sha512"]
+          with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
+              raw = stream.read(16*1024*1024 + 1)
+          assert len(raw) <= 16*1024*1024
+          names = set()
+          with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
+              for member in archive:
+                  assert len(names) < 200 and member.name not in names
+                  assert re.fullmatch(r"package/[A-Za-z0-9_./@-]+", member.name)
+                  assert all(part not in ["", ".", ".."] for part in member.name.rstrip("/").split("/"))
+                  assert member.isfile() or member.isdir()
+                  assert 0 <= member.size <= 4*1024*1024
+                  assert not member.pax_headers
+                  names.add(member.name)
+              package = json.load(archive.extractfile("package/package.json"))
+          assert package["name"] == "@openclaw/babelfish" and package["version"] == "0.1.1"
+          assert package["repository"]["url"] == "git+https://github.com/openclaw/babelfish.git"
+          assert package["publishConfig"] == {"access": "public", "registry": "https://registry.npmjs.org/"}
+          assert package["main"] == "./dist/index.js" and package["types"] == "./dist/index.d.ts"
+          assert package["exports"] == {".": {"types": "./dist/index.d.ts", "import": "./dist/index.js"}}
+          assert package["bin"] == {"babelfish": "dist/bin.js"} and package["type"] == "module"
+          assert all("package/" + name in names for name in ["dist/index.js", "dist/index.d.ts", "dist/bin.js", "docs/compatibility.md", "openclaw.plugin.json", "python/hermes_openclaw_bridge.py"])
+          ref = json.loads(get(api + "git/ref/tags/v0.1.1", True))
+          assert ref["object"]["type"] == "tag" and ref["object"]["sha"] == proof["tagObject"]
+          tag = json.loads(get(api + "git/tags/" + proof["tagObject"], True))
+          assert tag["object"]["sha"] == proof["source"] and tag["verification"]["verified"]
+          def view():
+              result = subprocess.run(["npm", "view", "@openclaw/babelfish@0.1.1", "--json", "--registry=https://registry.npmjs.org/"], capture_output=True, text=True, timeout=60)
+              try:
+                  metadata = json.loads(result.stdout)
+              except Exception:
+                  raise RuntimeError("Uncertain registry response; no publish permitted")
+              if result.returncode == 0:
+                  assert metadata["name"] == "@openclaw/babelfish" and metadata["version"] == "0.1.1"
+                  return metadata
+              assert metadata.get("error", {}).get("code") == "E404", "Only an exact registry E404 permits publication"
+              return None
+          def reconcile(metadata):
+              assert metadata["dist"]["integrity"] == env["TAR_INTEGRITY"] == proof["integrity"]
+              url = "https://registry.npmjs.org/@openclaw/babelfish/-/babelfish-0.1.1.tgz"
+              assert metadata["dist"]["tarball"] == url
+              published = get(url, limit=8*1024*1024)
+              assert published == data
+              assert hashlib.sha256(published).hexdigest() == proof["sha256"]
+              assert hashlib.sha512(published).hexdigest() == proof["sha512"]
+              assert hashlib.sha1(published).hexdigest() == metadata["dist"]["shasum"]
+              print("Registry reconciled to immutable tested bytes: " + proof["sha256"])
+          metadata = view()
+          if metadata is not None:
+              reconcile(metadata)
+          else:
+              for attempt in range(1, int(env["GITHUB_RUN_ATTEMPT"])):
+                  for page in range(1, 51):
+                      jobs = json.loads(get(api + "actions/runs/" + env["GITHUB_RUN_ID"] + "/attempts/" + str(attempt) + "/jobs?per_page=100&page=" + str(page), True))["jobs"]
+                      for job in jobs:
+                          if job["name"] == "Publish immutable npm package":
+                              assert not any(step["name"] == "Publish or reconcile immutable bytes" and step.get("started_at") and step.get("conclusion") != "skipped" for step in job["steps"]), "Prior possible publish with no registry bytes; never republish"
+                      if len(jobs) < 100:
+                          break
+                  else:
+                      raise RuntimeError("Prior publication admission pagination exceeded bound")
+              try:
+                  result = subprocess.run(["npm", "publish", str(tarball), "--ignore-scripts", "--provenance", "--access=public", "--tag=latest", "--registry=https://registry.npmjs.org/"], timeout=180)
+                  publish_exit = result.returncode
+              except subprocess.TimeoutExpired:
+                  publish_exit = "uncertain timeout"
+              for index in range(6):
+                  metadata = view()
+                  if metadata is not None:
+                      reconcile(metadata)
+                      break
+                  if index < 5:
+                      time.sleep(10)
+              else:
+                  raise RuntimeError("Publish attempted once (exit " + str(publish_exit) + "); registry remains E404. Resolve trusted-publisher/registry blocker; never blindly republish.")
+          PY
+
+  verify:
+    name: Verify public npm release
+    needs: [build, publish]
+    if: github.ref_protected
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      proof: ${{ steps.verify.outputs.proof }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: release-artifacts
+          digest-mismatch: error
+      - name: Cryptographic provenance and fresh registry consumer proof
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact_digest }}
+        run: node scripts/verify-release.mjs release-artifacts
+
+  promote:
+    name: Promote verified GitHub release
+    needs: [build, verify]
+    if: github.ref_protected
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: release-artifacts
+          digest-mismatch: error
+      - name: Promote only after unprivileged verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_PROOF: ${{ needs.verify.outputs.proof }}
+        run: node scripts/promote-release.mjs release-artifacts

@@ -21,7 +21,7 @@ body:
   - type: input
     attributes:
       label: Babelfish version or commit
-      placeholder: 0.1.0 or a commit SHA
+      placeholder: 0.1.1 or a commit SHA
     validations:
       required: true
 

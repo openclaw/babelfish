@@ -53,6 +53,8 @@ Installing an already installed name requires `--force`; a rejected duplicate le
 
 Support differs by source app and surface. See the [compatibility reference](docs/compatibility.md) for the full matrix, source-specific behavior, configuration, and example plugins.
 
+The compatibility reference ships in the npm package. Release validation tests the actual tarball in a fresh production-only consumer; see [the release procedure](https://github.com/openclaw/babelfish/blob/main/docs/releasing.md).
+
 Command-hook results, including blocking exit decisions, are retained when a hook exits without reading all stdin.
 
 ## Trust and lifecycle

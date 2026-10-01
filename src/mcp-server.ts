@@ -251,7 +251,7 @@ export function buildHermesMcpToolIndex(list: HermesListResult): HermesMcpToolIn
 
 export function createHermesMcpServer(config: HermesBridgeConfig): Server {
   const server = new Server(
-    { name: "babelfish", version: "0.1.0" },
+    { name: "babelfish", version: "0.1.1" },
     {
       capabilities: {
         tools: { listChanged: true },

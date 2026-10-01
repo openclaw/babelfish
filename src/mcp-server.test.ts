@@ -8,6 +8,22 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildHermesMcpToolIndex, createHermesMcpServer, MAX_RUNNING_TASKS } from "./mcp-server.js";
 import * as hermesPython from "./hermes-python.js";
 
+it("advertises the released MCP runtime identity", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-version-"));
+  const server = createHermesMcpServer({ installDir: root, rootDir: root, python: "python3", timeoutMs: 1000, env: {} });
+  const client = new Client({ name: "version-test", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    expect(client.getServerVersion()).toEqual({ name: "babelfish", version: "0.1.1" });
+  } finally {
+    await client.close();
+    await server.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 async function copyFixture(target: string, fixtureName: string, installedName: string): Promise<void> {
   const fixture = path.join(process.cwd(), "test/fixtures", fixtureName);
   await fs.cp(fixture, path.join(target, installedName), { recursive: true });

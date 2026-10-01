@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.1.1 (Unreleased)
+## 0.1.1 — 2026-10-01
+
+- Align MCP runtime identities with 0.1.1 and ship the linked compatibility guide in the public package.
+- Validate the actual release tarball in an isolated production consumer, including strict declarations and late-regeneration rollback; publish retained bytes through a signed, protected tag and trusted OIDC workflow with independent registry verification before release promotion.
 
 - Allow discovery and hooks without Python only for a verified absent or empty Hermes install; preserve failed installed guards and propagate pre-tool callback failures. Thanks @SebTardif.
 - Keep concurrent turns waiting for their current session start, consume its context once, and recover later turns after a failed start without deleting a newer pending start. Thanks @SebTardif.
