@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { build } from "esbuild";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -126,9 +127,19 @@ describe("Hermes MCP server", () => {
     const client = new Client({ name: "command-stdio-test", version: "0.0.0" });
     try {
       await copyFixture(installDir, "simple-hermes-plugin", "simple");
-      for (const file of ["dist", "python", "package.json"]) {
+      for (const file of ["python", "package.json"]) {
         await fs.cp(path.join(process.cwd(), file), path.join(runtime, file), { recursive: true });
       }
+      await build({
+        entryPoints: ["src/bin.ts"],
+        outfile: path.join(runtime, "dist", "bin.js"),
+        bundle: true,
+        external: ["@modelcontextprotocol/sdk/*"],
+        format: "esm",
+        packages: "bundle",
+        platform: "node",
+        banner: { js: "#!/usr/bin/env node" },
+      });
       await fs.symlink(await fs.realpath("node_modules"), path.join(runtime, "node_modules"), "junction");
       const transport = new StdioClientTransport({
         command: process.execPath,
