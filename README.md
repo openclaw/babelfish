@@ -41,7 +41,7 @@ Installing an already installed name requires `--force`; a rejected duplicate le
 | Source contribution | OpenClaw behavior |
 | --- | --- |
 | Agent and MCP tools | Native tools that retain the source JSON schema. MCP inspection follows at most 50 tool pages within one request-timeout budget and rejects repeated cursors. |
-| Skills and support files | Native OpenClaw skills with referenced files intact; Markdown frontmatter supports LF and Windows CRLF line endings. In-root directory names such as `..skills` are supported. |
+| Skills and support files | Native OpenClaw skills with referenced files intact; Markdown frontmatter supports LF and Windows CRLF. Generated command, agent, and output-style descriptions support literal and folded YAML blocks, header comments, one-digit indentation indicators, and clip/strip/keep chomping. Copied skill bodies and assets remain intact. In-root directory names such as `..skills` are supported. |
 | Prompt and terminal commands | User-invoked skills or top-level CLI commands when the source format supports them |
 | Compatible hooks | Matching lifecycle, prompt, tool, compaction, and subagent hooks. Discovery permits 50 unique hook files and eight nested directories. Command-hook stdin is capped at 1 MiB; oversized decision events fail closed. String commands use a login shell; `args` or a `command` array spawn without a shell. |
 | Compatible middleware | Matching prompt-build and tool-result middleware |

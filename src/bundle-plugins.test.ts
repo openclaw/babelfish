@@ -398,7 +398,7 @@ process.exitCode = ${code};
     const plugin = await inspectBundlePlugin("claude-code", root);
     expect(plugin.outputStyles).toEqual([{
       name: "Brief",
-      description: "Keep replies short and specific.",
+      description: "Keep replies short and specific.\n",
       instructions: "Answer in three sentences.",
       keepCodingInstructions: true,
     }]);

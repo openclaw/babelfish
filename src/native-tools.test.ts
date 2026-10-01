@@ -443,7 +443,7 @@ await server.connect(new StdioServerTransport());
       .resolves.toMatch(/description: "Commit selected files"[\s\S]*argument-hint: '\[files\]'[\s\S]*allowed-tools: Bash\(git status \*\)[\s\S]*disable-model-invocation: true[\s\S]*Commit \$ARGUMENTS\./);
   });
 
-  it("reads folded and literal descriptions from commands and agents", async () => {
+  it.each(["\n", "\r\n"])("reads block descriptions from commands, agents and output styles with %j", async (eol) => {
     const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-bundle-state-"));
     const plugin = path.join(stateRoot, "claude-code", "fixture");
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-package-"));
@@ -452,25 +452,39 @@ await server.connect(new StdioServerTransport());
     await fs.mkdir(path.join(plugin, "commands"), { recursive: true });
     await fs.writeFile(path.join(plugin, "commands", "commit.md"), [
       "---",
-      "description: |",
+      "description: |2+ # literal",
       "  Commit the selected files",
       "  after reviewing the diff.",
+      "",
       "argument-hint: '[files]'",
       "---",
       "Commit $ARGUMENTS.",
       "",
-    ].join("\n"));
+    ].join(eol));
     await fs.mkdir(path.join(plugin, "agents"), { recursive: true });
     await fs.writeFile(path.join(plugin, "agents", "reviewer.md"), [
       "---",
       "name: Reviewer",
-      "description: >",
+      "description: >- # folded",
       "  Review the change",
       "  for regressions.",
+      "    Keep code indented.",
+      "",
+      "",
+      "  Final paragraph.",
       "---",
       "Look carefully.",
       "",
-    ].join("\n"));
+    ].join(eol));
+    await fs.mkdir(path.join(plugin, "output-styles"));
+    await fs.writeFile(path.join(plugin, "output-styles", "brief.md"), [
+      "---", "name: Brief", "description: > # clipped", "  Keep replies", "  short.",
+      "keep-coding-instructions: true", "---", "Answer briefly.", "",
+    ].join(eol));
+    await fs.mkdir(path.join(plugin, "skills", "copied"), { recursive: true });
+    const copied = ["---", "name: copied", "description: |+", "  Keep this scalar.", "", "---", "  Body.", ""].join(eol);
+    await fs.writeFile(path.join(plugin, "skills", "copied", "SKILL.md"), copied);
+    await fs.writeFile(path.join(plugin, "skills", "copied", "asset.txt"), "support bytes");
     await fs.mkdir(path.join(root, "skills"));
     await fs.writeFile(path.join(root, "openclaw.plugin.json"), JSON.stringify({ id: "babelfish", contracts: {} }));
     await regenerateNativeTools(
@@ -481,7 +495,7 @@ await server.connect(new StdioServerTransport());
       path.join(root, "skills", "babelfish-bundles", "claude-code-fixture-commit", "SKILL.md"),
       "utf8",
     );
-    expect(command).toContain('description: "Commit the selected files\\nafter reviewing the diff."');
+    expect(command).toContain('description: "Commit the selected files\\nafter reviewing the diff.\\n\\n"');
     expect(command).toContain("argument-hint: '[files]'");
     expect(command).not.toContain("description: \"|\"");
     expect(command).not.toMatch(/^ {2}Commit the selected files$/m);
@@ -490,8 +504,32 @@ await server.connect(new StdioServerTransport());
       path.join(root, "skills", "babelfish-bundles", "claude-code-fixture-reviewer", "SKILL.md"),
       "utf8",
     );
-    expect(agent).toContain('description: "Review the change for regressions."');
+    expect(agent).toContain('description: "Review the change for regressions.\\n  Keep code indented.\\n\\n\\nFinal paragraph."');
     expect(agent).not.toMatch(/^ {2}Review the change$/m);
     expect(agent).toContain("Look carefully.");
+    const generated = JSON.parse(await fs.readFile(path.join(root, "babelfish.generated.json"), "utf8"));
+    expect(generated.outputStyles).toMatchObject([{
+      description: "Keep replies short.\n", keepCodingInstructions: true, instructions: "Answer briefly.",
+    }]);
+    const skills = path.join(root, "skills", "babelfish-bundles");
+    await expect(fs.readFile(path.join(skills, "claude-code-fixture-brief", "SKILL.md"), "utf8"))
+      .resolves.toContain('description: "Keep replies short.\\n"');
+    const copiedSkill = await fs.readFile(path.join(skills, "claude-code-fixture-copied", "SKILL.md"), "utf8");
+    expect(copiedSkill).toContain("description: |+\n  Keep this scalar.\n\n---\n");
+    expect(copiedSkill).toContain(`  Body.${eol}`);
+    await expect(fs.readFile(path.join(skills, "claude-code-fixture-copied", "asset.txt"), "utf8"))
+      .resolves.toBe("support bytes");
+    const beforeManifest = await fs.readFile(path.join(root, "openclaw.plugin.json"), "utf8");
+    const beforeRegistry = await fs.readFile(path.join(root, "babelfish.generated.json"), "utf8");
+    await fs.writeFile(path.join(plugin, "commands", "commit.md"), "---\ndescription: |12\n  invalid\n---\n");
+    await expect(regenerateNativeTools(
+      { installDir: path.join(stateRoot, "hermes"), rootDir: stateRoot, python: "python3", timeoutMs: 1000, env: {} },
+      { root },
+    )).rejects.toThrow("Invalid block scalar header");
+    await expect(fs.readFile(path.join(root, "openclaw.plugin.json"), "utf8")).resolves.toBe(beforeManifest);
+    await expect(fs.readFile(path.join(root, "babelfish.generated.json"), "utf8")).resolves.toBe(beforeRegistry);
+    await expect(fs.readFile(path.join(skills, "claude-code-fixture-copied", "SKILL.md"), "utf8")).resolves.toBe(copiedSkill);
+    await fs.rm(stateRoot, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true });
   });
 });

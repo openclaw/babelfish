@@ -408,11 +408,12 @@ function convertedSkillMarkdown(name: string, source: string): string {
   if (parsed) {
     const { frontmatter } = parsed;
     const descriptionField = readFrontmatterScalar(frontmatter, "description");
-    if (descriptionField?.value) {
+    if (descriptionField) {
       description = descriptionField.value;
     }
     const consumed = new Set(descriptionField?.consumed ?? []);
     preserved = frontmatter
+      .replace(/\n$/, "")
       .split("\n")
       .filter((line, index) => (
         !consumed.has(index) && !/^(name|description|disable-model-invocation):/i.test(line)
@@ -437,7 +438,7 @@ function renamedSkillMarkdown(name: string, source: string): string {
   if (!parsed) {
     return convertedSkillMarkdown(name, source);
   }
-  const { frontmatter } = parsed;
+  const frontmatter = parsed.frontmatter.replace(/\n$/, "");
   const renamed = /^name:/m.test(frontmatter)
     ? frontmatter.replace(/^name:.*$/m, `name: ${name}`)
     : `name: ${name}\n${frontmatter}`;

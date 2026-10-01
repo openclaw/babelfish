@@ -47,6 +47,14 @@ Bundle paths must stay inside the plugin root, including after resolving skill-r
 
 Babelfish reads `.claude-plugin/plugin.json`, declared or conventional skill, command, agent, output-style, hook, and MCP paths. Existing `SKILL.md` directories are copied intact. Markdown commands, agents, and output styles are converted to user-invoked OpenClaw skills.
 
+Generated descriptions read literal (`|`) and folded (`>`) YAML block scalars,
+including header comments, single-digit indentation indicators, and `-`/`+`
+chomping indicators in either order. Folding retains breaks around more-indented
+content and repeated blank lines. Clip retains one final line break, strip
+removes trailing breaks, and keep retains them, including before the Markdown
+closing delimiter. LF and CRLF headers work without altering copied skill body
+bytes or support files. This is a scalar reader, not general YAML parsing.
+
 Command hooks run with `${CLAUDE_PLUGIN_ROOT}` set to the installed plugin directory. String `command` handlers run through a login shell. When `args` is set (Claude Code exec form), or when `command` is a string array, Babelfish spawns the executable directly without a shell. Single-turn `prompt` handlers use the active OpenClaw agent and model when `plugins.entries.babelfish.llm` allows both agent and model overrides. Without those trust flags they are reported but not executed. Multi-turn `agent` handlers are unsupported.
 
 ## Codex
