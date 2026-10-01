@@ -90,6 +90,11 @@ Use this mode only when an MCP client needs direct access to installed Hermes pl
 
 This mode covers Hermes plugins only. It does not provide Babelfish's native OpenClaw skills, hooks, middleware, or generated CLI commands.
 
+Hermes MCP command tools accept an optional string `args` field. Omitting the
+`arguments` object, passing `{}`, or passing `{ "args": "" }` sends an empty
+string to the command handler. Explicit text is preserved. This matches the
+default for command calls through `babelfish_task_start`.
+
 Configure an MCP client to launch:
 
 ```bash
