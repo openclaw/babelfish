@@ -407,7 +407,7 @@ export function createHermesMcpServer(config: HermesBridgeConfig): Server {
         {
           plugin: commandRoute.plugin,
           command: commandRoute.name,
-          args: asObject(request.params.arguments)?.args ?? request.params.arguments ?? "",
+          args: asObject(request.params.arguments)?.args ?? "",
         },
         { isolated: true },
       );
