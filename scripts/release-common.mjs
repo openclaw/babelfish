@@ -20,9 +20,13 @@ export async function boundedFetch(url, options = {}, limit = 2 * 1024 * 1024) {
   return Buffer.concat(chunks);
 }
 
+export function githubUrl(endpoint) {
+  return `https://api.github.com/repos/${REPO}${endpoint ? `/${endpoint}` : ""}`;
+}
+
 export async function github(endpoint, options = {}) {
   assert(process.env.GH_TOKEN, "scoped GitHub job token required");
-  return JSON.parse((await boundedFetch(`https://api.github.com/repos/${REPO}/${endpoint}`, {
+  return JSON.parse((await boundedFetch(githubUrl(endpoint), {
     ...options,
     headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", ...options.headers },
   })).toString("utf8"));
@@ -42,7 +46,7 @@ export async function pages(endpoint, field) {
 export async function outputs(values) {
   if (!process.env.GITHUB_OUTPUT) return;
   const lines = Object.entries(values).map(([key, value]) => {
-    assert(/^[a-z_]+$/.test(key) && !/[\r\n]/.test(String(value)), "safe workflow output");
+    assert(/^[a-z_][a-z0-9_]*$/.test(key) && !/[\r\n]/.test(String(value)), "safe workflow output");
     return `${key}=${value}\n`;
   });
   await fs.appendFile(process.env.GITHUB_OUTPUT, lines.join(""));

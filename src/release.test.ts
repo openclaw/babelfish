@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { gzipSync } from "node:zlib";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { inspectTarball } from "../scripts/package-archive.mjs";
-import { admitReleaseJobs, validateStatement } from "../scripts/release-common.mjs";
+import { admitReleaseJobs, githubUrl, outputs, validateStatement } from "../scripts/release-common.mjs";
 
 function tarball(overrides: Record<string, unknown> = {}, extra?: { name: string; type: string }) {
   const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -108,5 +110,28 @@ describe("failed-job publication retry admission", () => {
   it("rejects an unattempted or different-head publisher", () => {
     expect(() => admitReleaseJobs([{ ...publisher, head_sha: "b".repeat(40) }], [builder], proof)).toThrow();
     expect(() => admitReleaseJobs([{ ...publisher, steps: [{ ...publisher.steps[0], conclusion: "skipped" }] }], [builder], proof)).toThrow();
+  });
+});
+
+describe("release admission helper boundaries", () => {
+  it("uses the canonical repository URL for an empty endpoint", () => {
+    expect(githubUrl("")).toBe("https://api.github.com/repos/openclaw/babelfish");
+    expect(githubUrl("git/ref/tags/v0.1.1")).toBe("https://api.github.com/repos/openclaw/babelfish/git/ref/tags/v0.1.1");
+  });
+  it("serializes the complete artifact admission output set without allowing line injection", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "babelfish-release-output-"));
+    const target = path.join(root, "output");
+    vi.stubEnv("GITHUB_OUTPUT", target);
+    try {
+      const admission = { artifact_id: 123, artifact_digest: `sha256:${"a".repeat(64)}`, source: "b".repeat(40), tag_object: "c".repeat(40), size: 72073, sha256: "d".repeat(64), sha512: "e".repeat(128), integrity: "sha512-fixture" };
+      await outputs(admission);
+      expect(fs.readFileSync(target, "utf8")).toBe(Object.entries(admission).map(([key, value]) => `${key}=${value}\n`).join(""));
+      for (const invalid of [{ "1bad": "value" }, { "bad-key": "value" }, { "bad\nkey": "value" }, { safe: "value\nunsafe=true" }, { safe: "value\runsafe=true" }]) {
+        await expect(outputs(invalid)).rejects.toThrow("safe workflow output");
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
