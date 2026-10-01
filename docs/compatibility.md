@@ -37,7 +37,7 @@ Bundle paths must stay inside the plugin root, including after resolving skill-r
 | LLM/request/execution middleware | Partial | N/A | N/A | Request rewrites of OpenClaw system/context fields map to prompt-build hooks; provider and execution wrappers are reported but not run |
 | Codex app connectors | N/A | No | N/A | Connector IDs are not MCP servers and have no current equivalent |
 | LSP servers | N/A | N/A | No | Detected but not started |
-| Monitors | N/A | N/A | Partial | Always-on monitors run for the session and queue bounded stdout context; skill-triggered monitors are listed only |
+| Monitors | N/A | N/A | Partial | Always-on monitors run for the session and keep the last 50 stdout lines. The monitor stops after 1 MiB of total stdout from that process, including lines already consumed by a turn. Skill-triggered monitors are listed only |
 | Output styles | N/A | N/A | Partial | Imported as user-only skills |
 | Plugin settings/default agent | N/A | N/A | No | No native Babelfish mapping exists |
 | Supporting scripts, binaries, and assets | Full | Full | Full | Retained when referenced by an imported skill, hook, or MCP server |

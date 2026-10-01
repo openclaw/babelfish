@@ -47,6 +47,7 @@ Installing an already installed name requires `--force`; a rejected duplicate le
 | Compatible middleware | Matching prompt-build and tool-result middleware |
 | Hermes availability | An absent or empty install needs no Python for discovery or hooks; installed or unknown providers still require it, and failed pre-tool guards prevent execution |
 | Session-start context | Turn preparation waits for an in-flight session start. A failed start warns once instead of poisoning later turns; successful start context is consumed once. Concurrent prepares cannot bypass a pending start or remove a newer one. |
+| Session monitors | Always-on Claude monitors keep the last 50 stdout lines. The monitor stops once that process has written 1 MiB of stdout, even when those lines were already consumed. |
 | Hook command expansion | An unresolved variable blocks PreToolUse, UserPromptSubmit, and Stop decisions while preserving earlier results and running later hooks. Observer expansion failures warn and continue. Execution-error handling is unchanged. |
 | Stop hook decisions | On upgrade, installed Claude Code and Codex Stop hooks with `continue: false` finish the turn rather than request revision. This takes precedence over a block on the same hook only; a separate blocking hook still requests revision in either order. Pre-tool and prompt blocking is unchanged. |
 | Unsupported behavior | Recorded during generation and reported at Gateway startup |

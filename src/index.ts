@@ -1,5 +1,5 @@
 import type { ChildProcess } from "node:child_process";
-import readline from "node:readline";
+import { StringDecoder } from "node:string_decoder";
 import { resolveConfig } from "./config.js";
 import {
   hookAdditionalContext,
@@ -7,6 +7,7 @@ import {
   hookUpdatedInput,
   invokeBundleHooks,
   listBundlePlugins,
+  MAX_HOOK_OUTPUT_BYTES,
 } from "./bundle-plugins.js";
 import { runBabelfishCli } from "./cli.js";
 import {
@@ -222,15 +223,55 @@ async function startMonitors(
         child.kill();
         continue;
       }
-      const lines = readline.createInterface({ input: child.stdout });
-      lines.on("line", (line) => {
+      let received = 0;
+      let capped = false;
+      let pendingLine = "";
+      const decoder = new StringDecoder("utf8");
+      const recordLine = (line: string) => {
         const text = line.trim();
         if (!text) return;
         if (!monitorProcesses.get(key)?.includes(child)) return;
         const pending = monitorContext.get(key) ?? [];
         pending.push(`${monitor.description}: ${text}`);
         monitorContext.set(key, pending.slice(-50));
+      };
+      const takeText = (text: string) => {
+        pendingLine += text;
+        const parts = pendingLine.split(/\r\n|\n|\r/);
+        pendingLine = parts.pop() ?? "";
+        for (const part of parts) recordLine(part);
+      };
+      const stopForCap = () => {
+        if (capped) return;
+        capped = true;
+        warn(
+          `Babelfish monitor ${plugin.key}/${monitor.name} exceeded the ${MAX_HOOK_OUTPUT_BYTES}-byte output limit`,
+        );
+        terminateShellProcessTree(child);
+        setTimeout(() => {
+          terminateShellProcessTree(child, process.platform, "SIGKILL");
+        }, 250).unref();
+      };
+      let tailFlushed = false;
+      const flushTail = () => {
+        if (capped || tailFlushed) return;
+        tailFlushed = true;
+        takeText(decoder.end());
+        if (pendingLine.length > 0) recordLine(pendingLine);
+        pendingLine = "";
+      };
+      child.stdout.on("data", (chunk: Buffer) => {
+        if (capped) return;
+        const room = MAX_HOOK_OUTPUT_BYTES - received;
+        const accepted = chunk.length > room ? chunk.subarray(0, Math.max(0, room)) : chunk;
+        if (accepted.length > 0) {
+          received += accepted.length;
+          takeText(decoder.write(accepted));
+        }
+        if (chunk.length > room) stopForCap();
       });
+      child.stdout.on("end", flushTail);
+      child.stdout.on("close", flushTail);
     }
   }
   if (children.length === 0) {

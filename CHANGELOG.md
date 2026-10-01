@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Terminate a session monitor when its total stdout exceeds 1 MiB, including output already consumed by a turn. Keep complete lines that fit under the cap, including a final line with no newline and carriage-return breaks, and decode UTF-8 across reads. Thanks @SebTardif.
+
 ## 0.1.1 — 2026-10-01
 
 - Align MCP runtime identities with 0.1.1 and ship the linked compatibility guide in the public package.

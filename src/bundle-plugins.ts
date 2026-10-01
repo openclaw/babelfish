@@ -27,7 +27,7 @@ const SUPPORTED_HOOK_EVENTS = new Set([
   "SubagentStop",
   "Stop",
 ]);
-const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
+export const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 const MAX_LIST_TOOLS_PAGES = 50;
 const MAX_HOOK_STDIN_BYTES = MAX_HOOK_OUTPUT_BYTES;
 const DECISION_HOOK_EVENTS = new Set(["PreToolUse", "UserPromptSubmit", "Stop"]);
