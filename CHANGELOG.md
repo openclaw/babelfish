@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Refresh Vitest to 5.0.3, Node typings to 26.6.4, and their transitive development dependencies while retaining Node.js 22.19 support.
+
 ## 0.1.1 — 2026-10-01
 
 - Align MCP runtime identities with 0.1.1 and ship the linked compatibility guide in the public package.
