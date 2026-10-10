@@ -55,7 +55,7 @@ describe("babelfish install clone timeout", () => {
   }, 15_000);
 
   it.each(["flag", "environment"])("honors the %s timeout and closes the stalled Git transport", async (override) => {
-    const timeoutMs = process.platform === "win32" ? 10_000 : 400;
+    const timeoutMs = process.platform === "win32" ? 10_000 : 2_000;
     const sockets: net.Socket[] = [];
     const server = net.createServer((socket) => {
       sockets.push(socket);

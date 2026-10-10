@@ -67,7 +67,7 @@ describe("plugin lifecycle", () => {
       }
       await expect(installPlugin({
         installDir, source: `http://127.0.0.1:${port}/stalled.git`,
-        name: "plugin", force, timeoutMs: process.platform === "win32" ? 10_000 : 400,
+        name: "plugin", force, timeoutMs: process.platform === "win32" ? 10_000 : 2_000,
         validate, afterChange,
       })).rejects.toThrow(/Git clone timed out/);
       expect(validate).not.toHaveBeenCalled();

@@ -29,6 +29,7 @@ import {
   type NativeToolEntry,
 } from "./native-tools.js";
 import {
+  expandSingleQuotedShellVariables,
   spawnMonitorShellCommand,
   terminateShellProcessTree,
 } from "./shell-command.js";
@@ -197,11 +198,20 @@ async function startMonitors(
   if (monitorProcesses.get(key) !== children) return;
   for (const plugin of plugins) {
     for (const monitor of plugin.monitors) {
-      const command = monitor.command.replaceAll("${CLAUDE_PROJECT_DIR}", workspace);
+      const command = expandSingleQuotedShellVariables(monitor.command, (name) => {
+        if (name === "CLAUDE_PLUGIN_ROOT" || name === "PLUGIN_ROOT") return plugin.path;
+        if (name === "CLAUDE_PROJECT_DIR") return workspace;
+        return undefined;
+      });
       const child = spawnMonitorShellCommand(command, {
         cwd: workspace,
         detached: true,
-        env: { ...process.env, CLAUDE_PLUGIN_ROOT: plugin.path, PLUGIN_ROOT: plugin.path },
+        env: {
+          ...process.env,
+          CLAUDE_PLUGIN_ROOT: plugin.path,
+          PLUGIN_ROOT: plugin.path,
+          CLAUDE_PROJECT_DIR: workspace,
+        },
         stdio: ["ignore", "pipe", "inherit"],
         windowsHide: true,
       });
