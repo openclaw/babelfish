@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Refresh the MCP SDK to 1.32.1 and Node typings to 26.6.5 while retaining Node.js 22.19 support.
 - Refresh Vitest to 5.0.3, Node typings to 26.6.4, and their transitive development dependencies while retaining Node.js 22.19 support.
 - Bound session monitor lines and queued context to 1 MiB while preserving long-running monitors across consumed turns, UTF-8 decoding, carriage-return breaks, and final lines without a newline. Thanks @SebTardif.
 
