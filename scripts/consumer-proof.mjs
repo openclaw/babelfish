@@ -39,7 +39,7 @@ if (process.argv[2] !== "--worker") {
     env.npm_config_offline = "true";
     env.npm_config_cache = process.env.npm_config_cache || path.join(os.homedir(), ".npm");
   }
-  const run = (command, args, cwd) => execFileSync(command, args, { cwd, env, encoding: "utf8", timeout: 120_000, maxBuffer: 4 * 1024 * 1024, shell: process.platform === "win32" && command.endsWith(".cmd") });
+  const run = (command, args, cwd, timeout = 120_000) => execFileSync(command, args, { cwd, env, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024, shell: process.platform === "win32" && command.endsWith(".cmd") });
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   let workerError;
   try {
@@ -53,7 +53,8 @@ if (process.argv[2] !== "--worker") {
     await fs.mkdir(consumer);
     await fs.writeFile(path.join(consumer, "package.json"), '{"private":true,"type":"module"}\n');
     run(npm, ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact", target.startsWith("@") ? target : path.resolve(target)], consumer);
-    run(process.execPath, [script, "--worker", consumer, path.resolve(tools)], consumer);
+    // The worker runs the full lifecycle suite, not just one bounded command.
+    run(process.execPath, [script, "--worker", consumer, path.resolve(tools)], consumer, 360_000);
     if (process.env.BABELFISH_AUDIT_SIGNATURES === "1") {
       assert(target.startsWith("@"), "registry installation required for signature audit");
       const audit = JSON.parse(run(npm, ["audit", "signatures", "--json", "--include-attestations"], consumer));

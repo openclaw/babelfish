@@ -35,6 +35,11 @@ regeneration failure. Compiler `7.0.2` and Node types `26.6.3` live in a separat
 qualified tool installation, never in the production dependency tree. Docker
 warms these inputs before running the low-memory matrix without network access.
 
+Individual consumer commands retain a two-minute timeout. The full lifecycle
+worker has six minutes, and its driver has twelve minutes for fresh installs,
+the worker, optional signature auditing, and cleanup. These separate budgets
+allow Windows cold starts without letting one stalled command run indefinitely.
+
 The build uploads one immutable `npm-package-<run_id>` artifact. Workflow outputs
 and the run summary retain its ID and container digest plus tar SHA256, SHA512,
 integrity, size, source commit, signed tag object, and initial build attempt.

@@ -28,7 +28,8 @@ try {
   }
   const inspected = inspectTarball(await fs.readFile(tarball));
   execFileSync(process.execPath, [path.join(root, "scripts", "consumer-proof.mjs"), tarball], {
-    cwd: os.tmpdir(), stdio: "inherit", timeout: 240_000,
+    // Include both fresh installs, the lifecycle suite, and cleanup.
+    cwd: os.tmpdir(), stdio: "inherit", timeout: 720_000,
   });
   const { size, sha256, sha512, integrity } = inspected;
   const manifest = { filename: path.basename(tarball), size, sha256, sha512, integrity };
