@@ -54,7 +54,7 @@ for (const signature of metadata.dist.signatures) {
 }
 const driver = fileURLToPath(new URL("./consumer-proof.mjs", import.meta.url));
 const audit = JSON.parse(execFileSync(process.execPath, [driver, `${PACKAGE_NAME}@${PACKAGE_VERSION}`], {
-  env: { ...process.env, BABELFISH_AUDIT_SIGNATURES: "1" }, encoding: "utf8", timeout: 240_000, maxBuffer: 4 * 1024 * 1024,
+  env: { ...process.env, BABELFISH_AUDIT_SIGNATURES: "1" }, encoding: "utf8", timeout: 720_000, maxBuffer: 4 * 1024 * 1024,
 }));
 assert.equal(audit.invalid?.length, 0);
 assert.equal(audit.missing?.length, 0);

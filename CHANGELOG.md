@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Give the full package-consumer lifecycle suite its own timeout budget so Windows cold starts do not exhaust a single-command limit; retain bounded individual commands and release verification.
+- Refresh Vitest to 5.0.5 and its development dependencies while retaining Node.js 22.19 support.
 - Refresh the MCP SDK to 1.32.1 and Node typings to 26.6.5 while retaining Node.js 22.19 support.
 - Preserve literal variable values in string hooks and monitors while retaining installed deny guards across quoting, command substitutions, case patterns, arithmetic, comments, and here-documents. Thanks @SebTardif.
 - Refresh Vitest to 5.0.3, Node typings to 26.6.4, and their transitive development dependencies while retaining Node.js 22.19 support.
