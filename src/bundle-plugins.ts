@@ -615,7 +615,7 @@ async function withTimeout<T>(run: Promise<T>, timeoutMs: number, onTimeout: () 
 }
 
 async function clientFor(plugin: BundlePlugin, server: BundleServer, timeoutMs: number): Promise<Client> {
-  const client = new Client({ name: "babelfish", version: "0.1.1" });
+  const client = new Client({ name: "babelfish", version: "0.1.2" });
   const raw = server.config;
   const url = typeof raw.url === "string" ? expandRoot(raw.url, plugin.path) : undefined;
   if (url) {

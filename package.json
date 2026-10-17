@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/babelfish",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "packageManager": "npm@11.19.1",
   "description": "Use plugins from supported coding and agent apps in OpenClaw",
   "license": "MIT",

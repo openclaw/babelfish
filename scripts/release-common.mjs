@@ -5,7 +5,15 @@ import { PACKAGE_NAME, PACKAGE_VERSION, REPOSITORY } from "./package-archive.mjs
 export const REPO = "openclaw/babelfish";
 export const TAG = `v${PACKAGE_VERSION}`;
 export const WORKFLOW = ".github/workflows/release.yml";
-export const SIGNER = "SHA256:OIEOnMWCJeKhWpBNlB42wwPuUG5gsC8Crq1ibnt7ylQ";
+export const SIGNER = "SHA256:WmI9lVtd7F2c5XyRHbZVO3yYYJzwsSNzcZQMPT147HI";
+
+export function validateDryRunContext(env) {
+  assert.equal(env.GITHUB_REPOSITORY, REPO);
+  assert.equal(env.GITHUB_EVENT_NAME, "workflow_dispatch");
+  assert.equal(env.GITHUB_REF, "refs/heads/main");
+  assert.equal(env.GITHUB_WORKFLOW_REF, `${REPO}/${WORKFLOW}@refs/heads/main`);
+  assert.equal(env.DRY_RUN, "true");
+}
 
 export async function boundedFetch(url, options = {}, limit = 2 * 1024 * 1024) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(30_000), redirect: "error" });
