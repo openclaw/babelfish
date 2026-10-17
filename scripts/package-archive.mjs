@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 
 export const PACKAGE_NAME = "@openclaw/babelfish";
-export const PACKAGE_VERSION = "0.1.1";
+export const PACKAGE_VERSION = "0.1.2";
 export const REPOSITORY = "https://github.com/openclaw/babelfish";
 
 export function inspectTarball(bytes) {

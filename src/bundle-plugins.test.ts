@@ -1134,7 +1134,7 @@ const mode = ${JSON.stringify(mode)};
 let page = 0;
 const server = new Server({name:"pager",version:"1"},{capabilities:{tools:{}}});
 server.setRequestHandler(ListToolsRequestSchema, async (request) => {
-  if (JSON.stringify(server.getClientVersion()) !== JSON.stringify({name:"babelfish",version:"0.1.1"})) {
+  if (JSON.stringify(server.getClientVersion()) !== JSON.stringify({name:"babelfish",version:"0.1.2"})) {
     throw new Error("unexpected Babelfish client identity");
   }
   page += 1;

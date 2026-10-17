@@ -60,10 +60,10 @@ if (process.argv[2] !== "--worker") {
       const audit = JSON.parse(run(npm, ["audit", "signatures", "--json", "--include-attestations"], consumer));
       assert.equal(audit.invalid?.length, 0);
       assert.equal(audit.missing?.length, 0);
-      assert(audit.verified?.some((entry) => entry.name === packageName && entry.version === "0.1.1"), "explicit Babelfish provenance verification");
+      assert(audit.verified?.some((entry) => entry.name === packageName && entry.version === "0.1.2"), "explicit Babelfish provenance verification");
       process.stdout.write(`${JSON.stringify(audit)}\n`);
     } else {
-      console.log(JSON.stringify({ package: `${packageName}@0.1.1`, cli: "passed", runtime: "passed", mcp: "passed", declarations: "passed", rollback: "passed", productionOnly: true, offline }));
+      console.log(JSON.stringify({ package: `${packageName}@0.1.2`, cli: "passed", runtime: "passed", mcp: "passed", declarations: "passed", rollback: "passed", productionOnly: true, offline }));
     }
   } catch (error) {
     workerError = error;
@@ -84,7 +84,7 @@ if (process.argv[2] !== "--worker") {
   assert.equal((await fs.lstat(installed)).isSymbolicLink(), false);
   const dependencyLock = await json(path.join(consumer, "package-lock.json"));
   assert(Object.values(dependencyLock.packages).every((entry) => !entry.dev), "production-only installation");
-  assert.equal((await json(path.join(installed, "package.json"))).version, "0.1.1");
+  assert.equal((await json(path.join(installed, "package.json"))).version, "0.1.2");
   for (const dependency of ["typescript", "vitest", "esbuild", "@types/node"]) {
     assert(!dependencyLock.packages[`node_modules/${dependency}`], "no development toolchain in consumer");
   }
@@ -137,7 +137,7 @@ if (process.argv[2] !== "--worker") {
     const client = new Client({ name: "package-consumer", version: "1" });
     try {
       await client.connect(transport);
-      assert.deepEqual(client.getServerVersion(), { name: "babelfish", version: "0.1.1" });
+      assert.deepEqual(client.getServerVersion(), { name: "babelfish", version: "0.1.2" });
       assert((await client.listTools()).tools.some((tool) => tool.name === "simple_echo"));
       const result = await client.callTool({ name: "simple_echo", arguments: { value: "immutable-consumer-ok" } });
       assert(!result.isError && JSON.stringify(result).includes("immutable-consumer-ok"));

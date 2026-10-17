@@ -16,7 +16,7 @@ it("advertises the released MCP runtime identity", async () => {
   try {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
-    expect(client.getServerVersion()).toEqual({ name: "babelfish", version: "0.1.1" });
+    expect(client.getServerVersion()).toEqual({ name: "babelfish", version: "0.1.2" });
   } finally {
     await client.close();
     await server.close();

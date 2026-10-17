@@ -3,7 +3,14 @@ name: Release
 on:
   push:
     tags:
-      - v0.1.1
+      - v0.1.2
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Validate the release package without publishing (main only)
+        type: boolean
+        required: true
+        default: true
 
 permissions:
   contents: read
@@ -17,8 +24,36 @@ env:
   GITHUB_REF_PROTECTED: ${{ github.ref_protected }}
 
 jobs:
+  dry-run:
+    name: Validate release without publishing
+    if: github.event_name == 'workflow_dispatch' && inputs.dry_run && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Build, check, pack, and prove fresh consumer
+        run: |
+          test "$(npm --version)" = 11.19.1
+          npm ci
+          npm run check
+          npm run pack:check -- --out release-artifacts
+      - name: Verify exact main and release metadata
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: node scripts/release-source.mjs dry-run release-artifacts
+
   build:
     name: Validate and retain package
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -87,7 +122,7 @@ jobs:
   publish:
     name: Publish immutable npm package
     needs: build
-    if: github.ref_protected
+    if: github.event_name == 'push' && github.ref_protected
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: stable-release
@@ -132,7 +167,7 @@ jobs:
           env = os.environ
           assert env["GITHUB_REF_PROTECTED"] == "true"
           assert env["GITHUB_REPOSITORY"] == "openclaw/babelfish"
-          assert env["GITHUB_REF"] == "refs/tags/v0.1.1"
+          assert env["GITHUB_REF"] == "refs/tags/v0.1.2"
           assert env["GITHUB_SHA"] == env["SOURCE"]
           assert not any(env.get(key) for key in ["NPM_TOKEN", "NODE_AUTH_TOKEN", "NPM_CONFIG_PROVENANCE_FILE"])
           class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -157,7 +192,7 @@ jobs:
           assert artifact["workflow_run"]["head_sha"] == env["SOURCE"]
           directory = pathlib.Path(env["RUNNER_TEMP"]) / "npm-artifact"
           proof = json.loads((directory / "package-proof.json").read_text())
-          assert proof["filename"] == "openclaw-babelfish-0.1.1.tgz"
+          assert proof["filename"] == "openclaw-babelfish-0.1.2.tgz"
           assert proof["source"] == env["SOURCE"] and proof["tagObject"] == env["TAG_OBJECT"]
           assert proof["runId"] == env["GITHUB_RUN_ID"] and proof["buildAttempt"] == 1
           tarball = directory / proof["filename"]
@@ -180,31 +215,31 @@ jobs:
                   assert not member.pax_headers
                   names.add(member.name)
               package = json.load(archive.extractfile("package/package.json"))
-          assert package["name"] == "@openclaw/babelfish" and package["version"] == "0.1.1"
+          assert package["name"] == "@openclaw/babelfish" and package["version"] == "0.1.2"
           assert package["repository"]["url"] == "git+https://github.com/openclaw/babelfish.git"
           assert package["publishConfig"] == {"access": "public", "registry": "https://registry.npmjs.org/"}
           assert package["main"] == "./dist/index.js" and package["types"] == "./dist/index.d.ts"
           assert package["exports"] == {".": {"types": "./dist/index.d.ts", "import": "./dist/index.js"}}
           assert package["bin"] == {"babelfish": "dist/bin.js"} and package["type"] == "module"
           assert all("package/" + name in names for name in ["dist/index.js", "dist/index.d.ts", "dist/bin.js", "docs/compatibility.md", "openclaw.plugin.json", "python/hermes_openclaw_bridge.py"])
-          ref = json.loads(get(api + "git/ref/tags/v0.1.1", True))
+          ref = json.loads(get(api + "git/ref/tags/v0.1.2", True))
           assert ref["object"]["type"] == "tag" and ref["object"]["sha"] == proof["tagObject"]
           tag = json.loads(get(api + "git/tags/" + proof["tagObject"], True))
           assert tag["object"]["sha"] == proof["source"] and tag["verification"]["verified"]
           def view():
-              result = subprocess.run(["npm", "view", "@openclaw/babelfish@0.1.1", "--json", "--registry=https://registry.npmjs.org/"], capture_output=True, text=True, timeout=60)
+              result = subprocess.run(["npm", "view", "@openclaw/babelfish@0.1.2", "--json", "--registry=https://registry.npmjs.org/"], capture_output=True, text=True, timeout=60)
               try:
                   metadata = json.loads(result.stdout)
               except Exception:
                   raise RuntimeError("Uncertain registry response; no publish permitted")
               if result.returncode == 0:
-                  assert metadata["name"] == "@openclaw/babelfish" and metadata["version"] == "0.1.1"
+                  assert metadata["name"] == "@openclaw/babelfish" and metadata["version"] == "0.1.2"
                   return metadata
               assert metadata.get("error", {}).get("code") == "E404", "Only an exact registry E404 permits publication"
               return None
           def reconcile(metadata):
               assert metadata["dist"]["integrity"] == env["TAR_INTEGRITY"] == proof["integrity"]
-              url = "https://registry.npmjs.org/@openclaw/babelfish/-/babelfish-0.1.1.tgz"
+              url = "https://registry.npmjs.org/@openclaw/babelfish/-/babelfish-0.1.2.tgz"
               assert metadata["dist"]["tarball"] == url
               published = get(url, limit=8*1024*1024)
               assert published == data
@@ -245,7 +280,7 @@ jobs:
   verify:
     name: Verify public npm release
     needs: [build, publish]
-    if: github.ref_protected
+    if: github.event_name == 'push' && github.ref_protected
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -278,7 +313,7 @@ jobs:
   promote:
     name: Promote verified GitHub release
     needs: [build, verify]
-    if: github.ref_protected
+    if: github.event_name == 'push' && github.ref_protected
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

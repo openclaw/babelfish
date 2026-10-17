@@ -4,18 +4,50 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspectTarball, PACKAGE_VERSION } from "./package-archive.mjs";
-import { github, outputs, pages, REPO, SIGNER, TAG, WORKFLOW } from "./release-common.mjs";
+import { github, outputs, pages, REPO, SIGNER, TAG, validateDryRunContext, WORKFLOW } from "./release-common.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const git = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 const mode = process.argv[2];
 assert.equal(process.env.GITHUB_REPOSITORY, REPO);
+const source = process.env.GITHUB_SHA;
+assert(/^[a-f0-9]{40}$/.test(source));
+
+async function verifyVersions() {
+  const pkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
+  assert.equal(pkg.version, PACKAGE_VERSION);
+  const lock = JSON.parse(await fs.readFile(path.join(root, "package-lock.json"), "utf8"));
+  assert.equal(lock.version, PACKAGE_VERSION);
+  assert.equal(lock.packages[""].version, PACKAGE_VERSION);
+}
+
+async function releaseNotes() {
+  const changelog = await fs.readFile(path.join(root, "CHANGELOG.md"), "utf8");
+  const notes = changelog.split(`## ${PACKAGE_VERSION} — 2026-10-17\n`)[1]?.split(/\n## /)[0]?.trim();
+  assert(notes, "dated contributor release notes required");
+  return notes;
+}
+
+if (mode === "dry-run") {
+  validateDryRunContext(process.env);
+  assert.equal(git(["rev-parse", "HEAD"]), source);
+  git(["-c", "maintenance.auto=false", "-c", "gc.auto=0", "fetch", "--no-tags", "--no-prune", "--no-write-fetch-head", "origin", "refs/heads/main:refs/remotes/origin/main"]);
+  assert.equal(git(["rev-parse", "origin/main"]), source, "dry run requires exact main HEAD");
+  await verifyVersions();
+  await releaseNotes();
+  const directory = path.resolve(process.argv[3]);
+  const proof = JSON.parse(await fs.readFile(path.join(directory, "package-proof.json"), "utf8"));
+  assert.equal(proof.filename, "openclaw-babelfish-0.1.2.tgz");
+  const checked = inspectTarball(await fs.readFile(path.join(directory, proof.filename)));
+  for (const key of ["size", "sha256", "sha512", "integrity"]) assert.equal(proof[key], checked[key]);
+  console.log(JSON.stringify({ dryRun: true, source, version: PACKAGE_VERSION, ...proof }));
+  process.exit(0);
+}
+
 assert.equal(process.env.GITHUB_REF_PROTECTED, "true", "protected release tag required");
 assert.equal(process.env.GITHUB_EVENT_NAME, "push");
 assert.equal(process.env.GITHUB_REF, `refs/tags/${TAG}`);
 assert.equal(process.env.GITHUB_WORKFLOW_REF, `${REPO}/${WORKFLOW}@refs/tags/${TAG}`);
-const source = process.env.GITHUB_SHA;
-assert(/^[a-f0-9]{40}$/.test(source));
 
 async function verifyTag() {
   assert.equal(git(["rev-parse", "HEAD"]), source);
@@ -35,11 +67,7 @@ async function verifyTag() {
   assert.equal(tag.verification.verified, true);
   assert.equal(tag.verification.reason, "valid");
   assert.match(tag.verification.signature, /BEGIN SSH SIGNATURE/);
-  const pkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
-  assert.equal(pkg.version, PACKAGE_VERSION);
-  const lock = JSON.parse(await fs.readFile(path.join(root, "package-lock.json"), "utf8"));
-  assert.equal(lock.version, PACKAGE_VERSION);
-  assert.equal(lock.packages[""].version, PACKAGE_VERSION);
+  await verifyVersions();
   return tagObject;
 }
 
@@ -60,16 +88,14 @@ if (mode === "discover") {
   const directory = path.resolve(process.argv[3]);
   const proofPath = path.join(directory, "package-proof.json");
   const proof = JSON.parse(await fs.readFile(proofPath, "utf8"));
-  assert.equal(proof.filename, "openclaw-babelfish-0.1.1.tgz");
+  assert.equal(proof.filename, "openclaw-babelfish-0.1.2.tgz");
   const checked = inspectTarball(await fs.readFile(path.join(directory, proof.filename)));
   for (const key of ["size", "sha256", "sha512", "integrity"]) assert.equal(proof[key], checked[key]);
   if (mode === "seal") {
     assert.equal(process.env.GITHUB_RUN_ATTEMPT, "1");
     Object.assign(proof, { source, tagObject, tag: TAG, version: PACKAGE_VERSION, runId: process.env.GITHUB_RUN_ID, buildAttempt: 1, signer: SIGNER });
     await fs.writeFile(proofPath, `${JSON.stringify(proof, null, 2)}\n`);
-    const changelog = await fs.readFile(path.join(root, "CHANGELOG.md"), "utf8");
-    const notes = changelog.split(`## ${PACKAGE_VERSION} — 2026-10-01\n`)[1]?.split(/\n## /)[0]?.trim();
-    assert(notes, "dated contributor release notes required");
+    const notes = await releaseNotes();
     await fs.writeFile(path.join(directory, "release-notes.md"), `${notes}\n`);
   } else {
     assert.equal(mode, "admit");
