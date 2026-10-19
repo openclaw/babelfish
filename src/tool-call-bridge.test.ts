@@ -65,7 +65,8 @@ describe("Hermes decision-provider availability", () => {
 
   it("still reports observer callback failures without discarding later observer results", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-observer-"));
-    const config = { rootDir: root, installDir: root, python: "python3", timeoutMs: 1000, env: {} };
+    // This checks observer results, not Python's cold-start latency.
+    const config = { rootDir: root, installDir: root, python: "python3", timeoutMs: 10000, env: {} };
     const session = { sessionId: "observer" };
     const { invokeHermesHook, invokeHermesMiddleware, releaseHermesBridge } = await import("./hermes-python.js");
     try {
@@ -87,7 +88,7 @@ describe("Hermes decision-provider availability", () => {
       releaseHermesBridge(config, session);
       await fs.rm(root, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });
 
 async function writePlugin(installDir: string, name: string, source: string): Promise<void> {
