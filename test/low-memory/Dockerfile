@@ -1,4 +1,4 @@
-FROM node:22.19-bookworm-slim
+FROM node:22.23.4-bookworm-slim
 
 RUN apt-get update \
   && apt-get install --yes --no-install-recommends ca-certificates git python3 time \

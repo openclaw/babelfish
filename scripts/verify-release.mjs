@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { inspectTarball, PACKAGE_NAME, PACKAGE_VERSION, REPOSITORY } from "./package-archive.mjs";
 import { admitReleaseJobs, boundedFetch, github, outputs, pages, REPO, TAG, validateStatement, WORKFLOW } from "./release-common.mjs";
 
-assert.equal(process.version, "v26.10.0");
+assert.equal(process.version, "v26.12.1");
 assert.equal(execFileSync("npm", ["--version"], { encoding: "utf8" }).trim(), "11.19.1");
 assert.equal(process.env.GITHUB_REF_PROTECTED, "true");
 const directory = path.resolve(process.argv[2]);
