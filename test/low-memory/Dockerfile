@@ -1,7 +1,7 @@
 FROM node:22.23.4-bookworm-slim
 
 RUN apt-get update \
-  && apt-get install --yes --no-install-recommends ca-certificates git python3 time \
+  && apt-get install --yes --no-install-recommends ca-certificates git openssh-client python3 time \
   && rm -rf /var/lib/apt/lists/*
 
 RUN npm install --global npm@11.19.1

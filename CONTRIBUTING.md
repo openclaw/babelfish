@@ -18,6 +18,7 @@ Prerequisites:
 - Node.js 22.19 or newer.
 - npm.
 - Git.
+- OpenSSH `ssh-keygen` for release-signature tests.
 - Python 3 available as `python3` for Hermes bridge tests.
 
 Install dependencies:
