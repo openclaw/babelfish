@@ -68,9 +68,11 @@ describe("verified release tag signer", () => {
     return git("rev-parse", `refs/tags/${tag}`);
   };
   beforeEach(() => {
-    vi.stubEnv("GIT_CONFIG_GLOBAL", os.devNull);
-    vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
     root = fs.mkdtempSync(path.join(os.tmpdir(), "babelfish-release-signer-"));
+    const config = path.join(root, "gitconfig");
+    fs.writeFileSync(config, "");
+    vi.stubEnv("GIT_CONFIG_GLOBAL", config);
+    vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
     fs.mkdirSync(path.join(root, ".github"));
     git("init", "--quiet", "--template=");
     git("config", "user.name", "Release fixture");
