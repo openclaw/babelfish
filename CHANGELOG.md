@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Allow Vincent's Git signing key for release tags and record the actual verified tag signer while preserving immutable tag and package proof bindings.
+
 - Keep full weekly CodeQL analysis without duplicate main-push scans, protect scheduled/manual runs, and analyze ready-for-review and checkout-attribute PR changes.
 
 - Allow Python cold starts in the observer-result test on slower CI runners while retaining dedicated timeout coverage.

@@ -1,11 +1,29 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { PACKAGE_NAME, PACKAGE_VERSION, REPOSITORY } from "./package-archive.mjs";
 
 export const REPO = "openclaw/babelfish";
 export const TAG = `v${PACKAGE_VERSION}`;
 export const WORKFLOW = ".github/workflows/release.yml";
-export const SIGNER = "SHA256:WmI9lVtd7F2c5XyRHbZVO3yYYJzwsSNzcZQMPT147HI";
+
+export function verifyReleaseTag(root, tag, source, tagObject) {
+  const git = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  assert.match(tagObject, /^[a-f0-9]{40}$/, "discovered tag object required");
+  assert.equal(git(["rev-parse", `refs/tags/${tag}`]), tagObject, "release tag object changed");
+  assert.equal(git(["cat-file", "-t", tagObject]), "tag", "annotated tag required");
+  assert.equal(git(["rev-parse", `${tagObject}^{commit}`]), source);
+  const result = spawnSync("git", ["-c", `gpg.ssh.allowedSignersFile=${path.join(root, ".github", "release-signers")}`, "verify-tag", "--raw", tagObject], {
+    cwd: root, encoding: "utf8", env: { ...process.env, LC_ALL: "C" }, timeout: 30_000, maxBuffer: 1024 * 1024,
+  });
+  assert.equal(result.status, 0, `release tag signature verification failed: ${result.error?.message ?? result.stderr}`);
+  // Git's SSH raw status names the verified key; signature:* format atoms cover
+  // commits, not tags. Read only the successful verification's first line.
+  const match = /^Good "git" signature for .+ with \S+ key (SHA256:[A-Za-z0-9+/]{43})\r?$/.exec(result.stderr.split("\n")[0]);
+  assert(match, "verified SSH tag signer fingerprint required");
+  return match[1];
+}
 
 export function validateDryRunContext(env) {
   assert.equal(env.GITHUB_REPOSITORY, REPO);
