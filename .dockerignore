@@ -1,5 +1,9 @@
 .git
-.github
+# The workflow regression reads this source inside the low-memory image.
+.github/*
+!.github/workflows
+.github/workflows/*
+!.github/workflows/codeql.yml
 dist
 node_modules
 coverage
