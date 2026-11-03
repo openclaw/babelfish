@@ -2,22 +2,22 @@ name: CodeQL
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
+      - ".gitattributes"
+      - "**/.gitattributes"
       - ".github/workflows/**"
       - "scripts/**"
       - "src/**"
       - "package-lock.json"
       - "package.json"
-  push:
-    branches:
-      - main
   schedule:
     - cron: "23 6 * * 1"
   workflow_dispatch:
 
 concurrency:
-  group: codeql-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: codeql-${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   actions: read
