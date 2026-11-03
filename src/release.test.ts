@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import { gzipSync } from "node:zlib";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { inspectTarball } from "../scripts/package-archive.mjs";
-import { admitReleaseJobs, githubUrl, outputs, validateDryRunContext, validateStatement } from "../scripts/release-common.mjs";
+import { admitReleaseJobs, githubUrl, outputs, TAG, validateDryRunContext, validateStatement, verifyReleaseTag } from "../scripts/release-common.mjs";
 
 describe("validation-only release dispatch", () => {
   const context = {
@@ -56,6 +57,153 @@ function tarball(overrides: Record<string, unknown> = {}, extra?: { name: string
   chunks.push(Buffer.alloc(1024));
   return gzipSync(Buffer.concat(chunks));
 }
+
+describe("verified release tag signer", () => {
+  let root: string;
+  let source: string;
+  let fingerprints: string[];
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  const signTag = (tag: string, key: number) => {
+    git("-c", `user.signingkey=${path.join(root, `key-${key}`)}`, "tag", "-s", "-m", "release fixture", tag);
+    return git("rev-parse", `refs/tags/${tag}`);
+  };
+  beforeEach(() => {
+    vi.stubEnv("GIT_CONFIG_GLOBAL", os.devNull);
+    vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "babelfish-release-signer-"));
+    fs.mkdirSync(path.join(root, ".github"));
+    git("init", "--quiet", "--template=");
+    git("config", "user.name", "Release fixture");
+    git("config", "user.email", "release@example.invalid");
+    git("config", "gpg.format", "ssh");
+    fingerprints = [0, 1, 2].map((index) => {
+      const key = path.join(root, `key-${index}`);
+      execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", key]);
+      return execFileSync("ssh-keygen", ["-lf", `${key}.pub`, "-E", "sha256"], { encoding: "utf8" }).split(" ")[1];
+    });
+    fs.writeFileSync(path.join(root, ".github", "release-signers"), [0, 1].map((index) =>
+      `signer-${index} namespaces="git" ${fs.readFileSync(path.join(root, `key-${index}.pub`), "utf8")}`,
+    ).join(""));
+    git("-c", `user.signingkey=${path.join(root, "key-0")}`, "commit", "--quiet", "--allow-empty", "-S", "-m", "fixture");
+    source = git("rev-parse", "HEAD");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("records each allowed tag key, independently of the commit signer", () => {
+    for (const key of [0, 1]) {
+      const tag = `signed-${key}`;
+      expect(verifyReleaseTag(root, tag, source, signTag(tag, key))).toBe(fingerprints[key]);
+    }
+    expect(git("-c", `gpg.ssh.allowedSignersFile=${path.join(root, ".github", "release-signers")}`, "log", "-1", "--format=%GF")).toBe(fingerprints[0]);
+  });
+
+  it.each(["unknown key", "wrong namespace", "unsigned", "lightweight", "tampered", "wrong source"])("rejects %s", (failure) => {
+    let tagObject: string;
+    if (failure === "unsigned" || failure === "lightweight") {
+      git(...(failure === "unsigned" ? ["tag", "-a", "-m", "unsigned", TAG] : ["tag", TAG]));
+      tagObject = git("rev-parse", TAG);
+    } else {
+      tagObject = signTag(TAG, failure === "unknown key" ? 2 : 1);
+    }
+    if (failure === "wrong namespace") {
+      const allowed = path.join(root, ".github", "release-signers");
+      fs.writeFileSync(allowed, fs.readFileSync(allowed, "utf8").replaceAll('namespaces="git"', 'namespaces="file"'));
+    }
+    if (failure === "tampered") {
+      const contents = git("cat-file", "tag", tagObject).replace("release fixture", "tampered fixture");
+      tagObject = execFileSync("git", ["hash-object", "-w", "-t", "tag", "--stdin"], { cwd: root, encoding: "utf8", input: `${contents}\n` }).trim();
+      git("update-ref", `refs/tags/${TAG}`, tagObject);
+    }
+    expect(() => verifyReleaseTag(root, TAG, failure === "wrong source" ? "a".repeat(40) : source, tagObject)).toThrow();
+  });
+
+  it("rejects a replacement tag signed by another allowed key for the same commit", () => {
+    const discovered = signTag(TAG, 0);
+    expect(verifyReleaseTag(root, TAG, source, discovered)).toBe(fingerprints[0]);
+    git("tag", "-d", TAG);
+    const replacement = signTag(TAG, 1);
+    expect(verifyReleaseTag(root, TAG, source, replacement)).toBe(fingerprints[1]);
+    expect(() => verifyReleaseTag(root, TAG, source, discovered)).toThrow("release tag object changed");
+  });
+
+  it("seals and admits the actual signer while rejecting altered frozen proof", () => {
+    const tagObject = signTag(TAG, 1);
+    git("branch", "-M", "main");
+    git("remote", "add", "origin", root);
+    fs.mkdirSync(path.join(root, "scripts"));
+    for (const file of ["release-source.mjs", "release-common.mjs", "package-archive.mjs"]) {
+      fs.copyFileSync(new URL(`../scripts/${file}`, import.meta.url), path.join(root, "scripts", file));
+    }
+    fs.copyFileSync(new URL("../CHANGELOG.md", import.meta.url), path.join(root, "CHANGELOG.md"));
+    for (const file of ["package.json", "package-lock.json"]) {
+      fs.copyFileSync(new URL(`../${file}`, import.meta.url), path.join(root, file));
+    }
+    const archive = tarball();
+    const { size, sha256, sha512, integrity } = inspectTarball(archive);
+    const directory = path.join(root, "artifact");
+    fs.mkdirSync(directory);
+    fs.writeFileSync(path.join(directory, "openclaw-babelfish-0.1.2.tgz"), archive);
+    const proofPath = path.join(directory, "package-proof.json");
+    fs.writeFileSync(proofPath, JSON.stringify({ filename: "openclaw-babelfish-0.1.2.tgz", size, sha256, sha512, integrity }));
+    const artifact = { id: 123, name: "npm-package-456", digest: `sha256:${"a".repeat(64)}`, workflow_run: { id: 456, head_sha: source }, expired: false };
+    const apiResponses = {
+      [`git/ref/tags/${TAG}`]: { object: { type: "tag", sha: tagObject } },
+      [`git/tags/${tagObject}`]: { tag: TAG, object: { type: "commit", sha: source }, verification: { verified: true, reason: "valid", signature: "-----BEGIN SSH SIGNATURE-----" } },
+      "actions/artifacts/123": artifact,
+    };
+    const mockApi = `const responses = ${JSON.stringify(apiResponses)};
+      globalThis.fetch = async (url) => {
+        const endpoint = url.replace("https://api.github.com/repos/openclaw/babelfish/", "");
+        if (endpoint === "actions/runs/456/artifacts?per_page=100&page=1") return Response.json({ artifacts: process.env.FIXTURE_REUSE === "true" ? [responses["actions/artifacts/123"]] : [] });
+        if (!Object.hasOwn(responses, endpoint)) throw Error("unexpected API request");
+        return Response.json(responses[endpoint]);
+      };`;
+    const env = {
+      ...process.env, GITHUB_REPOSITORY: "openclaw/babelfish", GITHUB_SHA: source,
+      GITHUB_REF_PROTECTED: "true", GITHUB_EVENT_NAME: "push", GITHUB_REF: `refs/tags/${TAG}`,
+      GITHUB_WORKFLOW_REF: `openclaw/babelfish/.github/workflows/release.yml@refs/tags/${TAG}`,
+      GITHUB_RUN_ID: "456", GITHUB_RUN_ATTEMPT: "1", TAG_OBJECT: "", FIXTURE_REUSE: "false",
+      GITHUB_OUTPUT: path.join(root, "outputs"), GITHUB_STEP_SUMMARY: path.join(root, "summary"),
+      GH_TOKEN: "fixture-token", ARTIFACT_ID: "123", ARTIFACT_DIGEST: artifact.digest,
+    };
+    const run = (mode: string) => spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(mockApi)}`, "scripts/release-source.mjs", mode, directory], { cwd: root, encoding: "utf8", env });
+    const discover = run("discover");
+    assert.equal(discover.status, 0, discover.stderr);
+    expect(fs.readFileSync(env.GITHUB_OUTPUT, "utf8")).toBe(`reuse=false\ntag_object=${tagObject}\n`);
+    env.TAG_OBJECT = fs.readFileSync(env.GITHUB_OUTPUT, "utf8").match(/^tag_object=(.+)$/m)![1];
+    const sealed = run("seal");
+    assert.equal(sealed.status, 0, sealed.stderr);
+    const proof = JSON.parse(fs.readFileSync(proofPath, "utf8"));
+    expect(proof.signer).toBe(fingerprints[1]);
+    expect(proof.tagObject).toBe(tagObject);
+    const admitted = run("admit");
+    assert.equal(admitted.status, 0, admitted.stderr);
+    expect(fs.readFileSync(path.join(root, "summary"), "utf8")).toContain(fingerprints[1]);
+    env.GITHUB_RUN_ATTEMPT = "2";
+    env.FIXTURE_REUSE = "true";
+    fs.writeFileSync(env.GITHUB_OUTPUT, "");
+    const rediscovered = run("discover");
+    assert.equal(rediscovered.status, 0, rediscovered.stderr);
+    expect(fs.readFileSync(env.GITHUB_OUTPUT, "utf8")).toBe(`reuse=true\ntag_object=${tagObject}\nartifact_id=123\nartifact_digest=${artifact.digest}\n`);
+    const readmitted = run("admit");
+    assert.equal(readmitted.status, 0, readmitted.stderr);
+    for (const alteration of [{ signer: fingerprints[0] }, { tagObject: "a".repeat(40) }, { sha256: "a".repeat(64) }]) {
+      fs.writeFileSync(proofPath, JSON.stringify({ ...proof, ...alteration }));
+      expect(run("admit").status).not.toBe(0);
+    }
+    fs.writeFileSync(proofPath, JSON.stringify(proof));
+    git("tag", "-d", TAG);
+    signTag(TAG, 0);
+    for (const mode of ["seal", "admit"]) {
+      const replaced = run(mode);
+      expect(replaced.status).not.toBe(0);
+      expect(replaced.stderr).toContain("release tag object changed");
+    }
+  });
+});
 
 describe("immutable release archive", () => {
   it("validates the public package metadata and computes both hashes", () => {

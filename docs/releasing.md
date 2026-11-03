@@ -16,16 +16,17 @@ reviewed change. Do not publish from a local checkout or use an npm token.
    `dry_run: true` and require that exact run to pass. This read-only validation
    builds, tests, and proves the package consumer without publishing, creating a
    tag, or accessing the publishing environment. Dispatch cannot publish.
-5. Use the fleet release SSH signer (`SHA256:WmI9lVtd…`) to create and verify an annotated tag
-   on qualified release main. The workflow also checks the pinned public key,
-   GitHub tag verification, version, and main ancestry.
+5. Use an SSH key listed in `.github/release-signers` to create and verify an
+   annotated tag on qualified release main. The workflow records the verified
+   tag signer's fingerprint and checks GitHub tag verification, version, and
+   main ancestry.
 6. Push the tag normally. The publisher runs only on GitHub-hosted infrastructure
    with the `stable-release` environment and trusted npm OIDC publishing.
 
 Keep an empty `Unreleased` section above the dated version and its one-line
 `**Highlights:**`. Preserve every existing changelog bullet and contributor credit.
 Update the package/lock, MCP identities, archive/consumer/provenance fixtures,
-source-release date and signer pin, and exact-version publisher assertions together.
+source-release date, and exact-version publisher assertions together.
 There are no native binaries, notarization, Homebrew, Go, or Sparkle channels.
 
 ## Package and privilege boundaries
@@ -53,6 +54,9 @@ allow Windows cold starts without letting one stalled command run indefinitely.
 The build uploads one immutable `npm-package-<run_id>` artifact. Workflow outputs
 and the run summary retain its ID and container digest plus tar SHA256, SHA512,
 integrity, size, source commit, signed tag object, and initial build attempt.
+The package proof records the actual verified SSH signer. Discovery freezes the
+tag object for sealing and admission; a replacement tag or mismatched signer
+fails admission, even when the replacement points to the same source commit.
 Retries paginate artifact metadata and reuse that artifact. Missing, expired,
 ambiguous, or digest-mismatched artifacts fail closed; retries never repack.
 

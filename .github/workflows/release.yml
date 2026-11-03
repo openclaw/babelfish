@@ -103,6 +103,7 @@ jobs:
         if: steps.discover.outputs.reuse == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_OBJECT: ${{ steps.discover.outputs.tag_object }}
         run: node scripts/release-source.mjs seal release-artifacts
       - name: Retain one immutable package artifact
         if: steps.discover.outputs.reuse == 'false'
@@ -119,6 +120,7 @@ jobs:
         id: admit
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_OBJECT: ${{ steps.discover.outputs.tag_object }}
           ARTIFACT_ID: ${{ steps.discover.outputs.artifact_id || steps.upload.outputs.artifact-id }}
           ARTIFACT_DIGEST: ${{ steps.discover.outputs.artifact_digest || steps.upload.outputs.artifact-digest }}
         run: node scripts/release-source.mjs admit release-artifacts

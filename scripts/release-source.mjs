@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspectTarball, PACKAGE_VERSION } from "./package-archive.mjs";
-import { github, outputs, pages, REPO, SIGNER, TAG, validateDryRunContext, WORKFLOW } from "./release-common.mjs";
+import { github, outputs, pages, REPO, TAG, validateDryRunContext, verifyReleaseTag, WORKFLOW } from "./release-common.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const git = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
@@ -49,14 +49,15 @@ assert.equal(process.env.GITHUB_EVENT_NAME, "push");
 assert.equal(process.env.GITHUB_REF, `refs/tags/${TAG}`);
 assert.equal(process.env.GITHUB_WORKFLOW_REF, `${REPO}/${WORKFLOW}@refs/tags/${TAG}`);
 
+// Discovery freezes the annotated object across packing, sealing, and retries.
+// Re-resolving the tag in later steps could silently admit a replacement signer.
+const tagObject = mode === "discover" ? git(["rev-parse", `refs/tags/${TAG}`]) : process.env.TAG_OBJECT;
+const signer = verifyReleaseTag(root, TAG, source, tagObject);
+
 async function verifyTag() {
   assert.equal(git(["rev-parse", "HEAD"]), source);
   git(["-c", "maintenance.auto=false", "-c", "gc.auto=0", "fetch", "--no-tags", "--no-prune", "--no-write-fetch-head", "origin", "refs/heads/main:refs/remotes/origin/main"]);
   git(["merge-base", "--is-ancestor", source, "origin/main"]);
-  assert.equal(git(["cat-file", "-t", TAG]), "tag", "annotated tag required");
-  assert.equal(git(["rev-parse", `${TAG}^{commit}`]), source);
-  git(["-c", `gpg.ssh.allowedSignersFile=${path.join(root, ".github", "release-signers")}`, "verify-tag", TAG]);
-  const tagObject = git(["rev-parse", TAG]);
   const ref = await github(`git/ref/tags/${TAG}`);
   assert.equal(ref.object.type, "tag");
   assert.equal(ref.object.sha, tagObject);
@@ -68,21 +69,20 @@ async function verifyTag() {
   assert.equal(tag.verification.reason, "valid");
   assert.match(tag.verification.signature, /BEGIN SSH SIGNATURE/);
   await verifyVersions();
-  return tagObject;
 }
 
-const tagObject = mode === "discover" ? await verifyTag() : git(["rev-parse", TAG]);
 const artifactName = `npm-package-${process.env.GITHUB_RUN_ID}`;
 if (mode === "discover") {
+  await verifyTag();
   const artifacts = (await pages(`actions/runs/${process.env.GITHUB_RUN_ID}/artifacts`, "artifacts")).filter((artifact) => artifact.name === artifactName);
   assert(artifacts.length <= 1, "single immutable package artifact");
   if (artifacts.length === 1) {
     const artifact = artifacts[0];
     assert(!artifact.expired && /^sha256:[a-f0-9]{64}$/.test(artifact.digest));
-    await outputs({ reuse: "true", artifact_id: artifact.id, artifact_digest: artifact.digest });
+    await outputs({ reuse: "true", tag_object: tagObject, artifact_id: artifact.id, artifact_digest: artifact.digest });
   } else {
     assert.equal(process.env.GITHUB_RUN_ATTEMPT, "1", "a retry cannot pack a replacement artifact");
-    await outputs({ reuse: "false" });
+    await outputs({ reuse: "false", tag_object: tagObject });
   }
 } else {
   const directory = path.resolve(process.argv[3]);
@@ -93,7 +93,7 @@ if (mode === "discover") {
   for (const key of ["size", "sha256", "sha512", "integrity"]) assert.equal(proof[key], checked[key]);
   if (mode === "seal") {
     assert.equal(process.env.GITHUB_RUN_ATTEMPT, "1");
-    Object.assign(proof, { source, tagObject, tag: TAG, version: PACKAGE_VERSION, runId: process.env.GITHUB_RUN_ID, buildAttempt: 1, signer: SIGNER });
+    Object.assign(proof, { source, tagObject, tag: TAG, version: PACKAGE_VERSION, runId: process.env.GITHUB_RUN_ID, buildAttempt: 1, signer });
     await fs.writeFile(proofPath, `${JSON.stringify(proof, null, 2)}\n`);
     const notes = await releaseNotes();
     await fs.writeFile(path.join(directory, "release-notes.md"), `${notes}\n`);
@@ -104,7 +104,7 @@ if (mode === "discover") {
     assert.equal(proof.tag, TAG);
     assert.equal(proof.runId, process.env.GITHUB_RUN_ID);
     assert.equal(proof.buildAttempt, 1);
-    assert.equal(proof.signer, SIGNER);
+    assert.equal(proof.signer, signer);
     const artifact = await github(`actions/artifacts/${process.env.ARTIFACT_ID}`);
     const digest = process.env.ARTIFACT_DIGEST.startsWith("sha256:") ? process.env.ARTIFACT_DIGEST : `sha256:${process.env.ARTIFACT_DIGEST}`;
     assert.equal(artifact.name, artifactName);
