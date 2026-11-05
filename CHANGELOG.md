@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refresh the MCP SDK and Node typings while preserving Node.js 22.19 support. Thanks @dependabot! #59 #60
+
 - Allow Vincent's Git signing key for release tags and record the actual verified tag signer while preserving immutable tag and package proof bindings.
 
 - Keep full weekly CodeQL analysis without duplicate main-push scans, protect scheduled/manual runs, and analyze ready-for-review and checkout-attribute PR changes.
