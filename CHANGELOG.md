@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Refresh the MCP SDK to 1.32.2, Vitest to 5.1.0, and CodeQL to 4.39.3 and patch transitive Hono vulnerabilities while retaining Node.js 22.19 support. Thanks @dependabot! #64 #65
+- Refresh Vitest to 5.1.0 and CodeQL to 4.39.3, and patch transitive Hono vulnerabilities while retaining Node.js 22.19 support. Thanks @dependabot! #64 #65
 
 - Refresh the MCP SDK and Node typings, and patch transitive body-parser, fast-uri, ip-address, qs, and Zod vulnerabilities while preserving Node.js 22.19 support. Thanks @dependabot! #59 #60
 
