@@ -1,5 +1,15 @@
 ## Summary
 
+<!--
+In What changed, lead with the problem, task, or value for plugin users or
+reviewers, then explain the implementation. Use Why for the motivation or
+tradeoff; not every change needs to describe a bug.
+
+Illustrative wording, not claims about this PR:
+- Implementation-first: "Refactor the transactional install code."
+- Reader-first: "Failed plugin installs should leave the previous plugin usable;
+  keep the previous files until the replacement succeeds."
+-->
 - What changed:
 - Why:
 - Related issue:
@@ -12,6 +22,16 @@
 
 ## Verification
 
+<!--
+Explain what validation established before listing commands or logs. Connect
+the outcome to the affected plugin surface or task, and state failures, skipped
+checks, and limitations without presenting them as passes.
+
+Illustrative wording, not an additional test requirement:
+- Command-only: "Ran the install tests."
+- Outcome-first: "The failed-install fixture retained the previous plugin files;
+  the focused install tests passed."
+-->
 - [ ] Added or updated focused tests.
 - [ ] Ran `npm run check`.
 - [ ] Ran `npm run pack:check`.
