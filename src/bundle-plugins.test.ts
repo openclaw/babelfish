@@ -16,7 +16,22 @@ import {
   MAX_HOOK_WALK_DEPTH,
 } from "./bundle-plugins.js";
 
-const fixtureTimeoutMs = 15_000;
+function hookConfig(rootDir: string) {
+  return { rootDir, installDir: path.join(rootDir, "hermes"), python: "python3", timeoutMs: 15_000, env: {} };
+}
+
+async function codexHookFixture() {
+  const rootDir = await tempDir("babelfish-root-");
+  const pluginRoot = path.join(rootDir, "codex", "fixture");
+  const manifestDir = path.join(pluginRoot, ".codex-plugin");
+  await fs.mkdir(manifestDir, { recursive: true });
+  return {
+    pluginRoot,
+    config: hookConfig(rootDir),
+    writeHooks: (hooks: Record<string, unknown>) =>
+      fs.writeFile(path.join(manifestDir, "plugin.json"), JSON.stringify({ hooks })),
+  };
+}
 
 function hookPayloadWithByteSize(bytes: number): Record<string, unknown> {
   const overhead = Buffer.byteLength('{"tool_response":""}', "utf8");
@@ -87,30 +102,19 @@ describe("bundle plugins", () => {
   });
 
   it("executes argv command hooks without a shell", async () => {
-    const rootDir = await tempDir("babelfish-root-");
-    const pluginRoot = path.join(rootDir, "codex", "fixture");
-    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    const { pluginRoot, config, writeHooks } = await codexHookFixture();
     await fs.writeFile(
       path.join(pluginRoot, "argv-hook.mjs"),
       "process.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify({hookSpecificOutput:{hookEventName:'SessionStart',additionalContext:process.argv.slice(2).join('\\0')}})));",
     );
-    await fs.writeFile(
-      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
-      JSON.stringify({
-        hooks: {
-          SessionStart: [{ hooks: [{
-            type: "command",
-            command: "node",
-            args: ["${PLUGIN_ROOT}/argv-hook.mjs", "$(echo INJECTED)"],
-          }] }],
-        },
-      }),
-    );
-    const results = await invokeBundleHooks(
-      { rootDir, installDir: path.join(rootDir, "hermes"), python: "python3", timeoutMs: fixtureTimeoutMs, env: {} },
-      "SessionStart",
-      {},
-    );
+    await writeHooks({
+      SessionStart: [{ hooks: [{
+        type: "command",
+        command: "node",
+        args: ["${PLUGIN_ROOT}/argv-hook.mjs", "$(echo INJECTED)"],
+      }] }],
+    });
+    const results = await invokeBundleHooks(config, "SessionStart", {});
     expect(results.map(hookAdditionalContext)).toEqual(["$(echo INJECTED)"]);
   }, 30_000);
 
@@ -119,38 +123,20 @@ describe("bundle plugins", () => {
     const plugin = await fixture("codex");
     await fs.mkdir(path.join(rootDir, "codex"), { recursive: true });
     await fs.rename(plugin, path.join(rootDir, "codex", "fixture"));
-    const results = await invokeBundleHooks(
-      { rootDir, installDir: path.join(rootDir, "hermes"), python: "python3", timeoutMs: fixtureTimeoutMs, env: {} },
-      "SessionStart",
-      {},
-    );
+    const results = await invokeBundleHooks(hookConfig(rootDir), "SessionStart", {});
     expect(results.map(hookAdditionalContext)).toEqual(["from hook"]);
   }, 30_000);
 
   it("terminates hooks that exceed the output limit", async () => {
-    const rootDir = await tempDir("babelfish-root-");
-    const pluginRoot = path.join(rootDir, "codex", "fixture");
-    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    const { pluginRoot, config, writeHooks } = await codexHookFixture();
     await fs.writeFile(
       path.join(pluginRoot, "noisy.mjs"),
       "process.stdout.write(Buffer.alloc(2 * 1024 * 1024, 120)); setTimeout(() => {}, 30_000);",
     );
-    await fs.writeFile(
-      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
-      JSON.stringify({
-        hooks: {
-          SessionStart: [{ hooks: [{ type: "command", command: "node noisy.mjs" }] }],
-        },
-      }),
-    );
+    await writeHooks({
+      SessionStart: [{ hooks: [{ type: "command", command: "node noisy.mjs" }] }],
+    });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const config = {
-      rootDir,
-      installDir: path.join(rootDir, "hermes"),
-      python: "python3",
-      timeoutMs: fixtureTimeoutMs,
-      env: {},
-    };
     try {
       await expect(invokeBundleHooks(config, "SessionStart", {})).resolves.toEqual([]);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("1048576-byte output limit"));
@@ -160,30 +146,16 @@ describe("bundle plugins", () => {
   });
 
   it("rejects hooks whose stdin payload exceeds 1 MiB", async () => {
-    const rootDir = await tempDir("babelfish-root-");
-    const pluginRoot = path.join(rootDir, "codex", "fixture");
+    const { pluginRoot, config, writeHooks } = await codexHookFixture();
     const marker = path.join(pluginRoot, "ran.txt");
-    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
     await fs.writeFile(
       path.join(pluginRoot, "reader.mjs"),
       `import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(marker)}, "ran"); process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({ok:true})));`,
     );
-    await fs.writeFile(
-      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
-      JSON.stringify({
-        hooks: {
-          PostToolUse: [{ hooks: [{ type: "command", command: "node reader.mjs" }] }],
-        },
-      }),
-    );
+    await writeHooks({
+      PostToolUse: [{ hooks: [{ type: "command", command: "node reader.mjs" }] }],
+    });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const config = {
-      rootDir,
-      installDir: path.join(rootDir, "hermes"),
-      python: "python3",
-      timeoutMs: fixtureTimeoutMs,
-      env: {},
-    };
     try {
       await expect(invokeBundleHooks(config, "PostToolUse", hookPayloadWithByteSize(1024 * 1024 + 1))).resolves.toEqual([]);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("1048576-byte payload limit"));
@@ -194,28 +166,14 @@ describe("bundle plugins", () => {
   });
 
   it("runs hooks whose stdin payload is exactly 1 MiB", async () => {
-    const rootDir = await tempDir("babelfish-root-");
-    const pluginRoot = path.join(rootDir, "codex", "fixture");
-    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    const { pluginRoot, config, writeHooks } = await codexHookFixture();
     await fs.writeFile(
       path.join(pluginRoot, "reader.mjs"),
       "process.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify({hookSpecificOutput:{additionalContext:'ok'}})));",
     );
-    await fs.writeFile(
-      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
-      JSON.stringify({
-        hooks: {
-          PostToolUse: [{ hooks: [{ type: "command", command: "node reader.mjs" }] }],
-        },
-      }),
-    );
-    const config = {
-      rootDir,
-      installDir: path.join(rootDir, "hermes"),
-      python: "python3",
-      timeoutMs: fixtureTimeoutMs,
-      env: {},
-    };
+    await writeHooks({
+      PostToolUse: [{ hooks: [{ type: "command", command: "node reader.mjs" }] }],
+    });
     await expect(
       invokeBundleHooks(config, "PostToolUse", hookPayloadWithByteSize(1024 * 1024)),
     ).resolves.toEqual([{ hookSpecificOutput: { additionalContext: "ok" } }]);
@@ -224,30 +182,16 @@ describe("bundle plugins", () => {
   it.each(["PreToolUse", "UserPromptSubmit", "Stop"] as const)(
     "blocks %s when stdin exceeds 1 MiB instead of skipping the decision",
     async (event) => {
-      const rootDir = await tempDir("babelfish-root-");
-      const pluginRoot = path.join(rootDir, "codex", "fixture");
+      const { pluginRoot, config, writeHooks } = await codexHookFixture();
       const marker = path.join(pluginRoot, "ran.txt");
-      await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
       await fs.writeFile(
         path.join(pluginRoot, "reader.mjs"),
         `import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(marker)}, "ran"); process.exit(0);`,
       );
-      await fs.writeFile(
-        path.join(pluginRoot, ".codex-plugin", "plugin.json"),
-        JSON.stringify({
-          hooks: {
-            [event]: [{ hooks: [{ type: "command", command: "node reader.mjs" }] }],
-          },
-        }),
-      );
+      await writeHooks({
+        [event]: [{ hooks: [{ type: "command", command: "node reader.mjs" }] }],
+      });
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const config = {
-        rootDir,
-        installDir: path.join(rootDir, "hermes"),
-        python: "python3",
-        timeoutMs: fixtureTimeoutMs,
-        env: {},
-      };
       try {
         await expect(
           invokeBundleHooks(config, event, hookPayloadWithByteSize(1024 * 1024 + 1)),
@@ -288,10 +232,7 @@ console.log(JSON.stringify({ systemMessage: "ready" }));
 console.error("denied");
 process.exitCode = ${code};
 `);
-      const results = await invokeBundleHooks({
-        rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
-        timeoutMs: fixtureTimeoutMs, env: {},
-      }, "PreToolUse", { tool_input: { text: "x".repeat(512 * 1024) } });
+      const results = await invokeBundleHooks(hookConfig(rootDir), "PreToolUse", { tool_input: { text: "x".repeat(512 * 1024) } });
       expect(results).toEqual(code === 0
         ? [{ systemMessage: "ready" }]
         : [{ decision: "block", reason: "denied" }]);
@@ -326,13 +267,7 @@ process.exitCode = ${code};
       await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
         hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
       }));
-      await invokeBundleHooks({
-        rootDir,
-        installDir: path.join(rootDir, "hermes"),
-        python: "python3",
-        timeoutMs: fixtureTimeoutMs,
-        env: {},
-      }, "PreToolUse", {});
+      await invokeBundleHooks(hookConfig(rootDir), "PreToolUse", {});
       await expect(fs.stat(marker)).rejects.toThrow();
       await expect(fs.readFile(outputPath, "utf8")).resolves.toBe(payload);
     } finally {
@@ -378,10 +313,7 @@ process.exitCode = ${code};
     const plugin = path.join(rootDir, "codex", "fixture", ".codex-plugin");
     const marker = path.join(rootDir, "ran");
     const previous = process.env.BABELFISH_TEST_FLAG;
-    const config = {
-      rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
-      timeoutMs: fixtureTimeoutMs, env: {},
-    };
+    const config = hookConfig(rootDir);
     try {
       await fs.mkdir(plugin, { recursive: true });
       await fs.writeFile(path.join(plugin, "plugin.json"), JSON.stringify({
@@ -415,10 +347,7 @@ process.exitCode = ${code};
       await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
         hooks: { PreToolUse: [{ hooks: [{ type: "command", command: `node capture.cjs "${literal}" "\${BABELFISH_TEST_FLAG}"` }] }] },
       }));
-      const results = await invokeBundleHooks({
-        rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
-        timeoutMs: fixtureTimeoutMs, env: {},
-      }, "PreToolUse", {});
+      const results = await invokeBundleHooks(hookConfig(rootDir), "PreToolUse", {});
       expect(results).toEqual([]);
       const captured = JSON.parse(await fs.readFile(path.join(plugin, "captured.json"), "utf8"));
       expect(captured).toEqual([literal, value]);
@@ -441,10 +370,7 @@ process.exitCode = ${code};
       await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
         hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
       }));
-      const config = {
-        rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
-        timeoutMs: fixtureTimeoutMs, env: {},
-      };
+      const config = hookConfig(rootDir);
       const denied = await invokeBundleHooks(config, "PreToolUse", {});
       expect(denied).toEqual([
         { decision: "block", reason: expect.any(String) },
@@ -480,10 +406,7 @@ process.exitCode = ${code};
       await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
         hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
       }));
-      await invokeBundleHooks({
-        rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
-        timeoutMs: fixtureTimeoutMs, env: {},
-      }, "PreToolUse", {});
+      await invokeBundleHooks(hookConfig(rootDir), "PreToolUse", {});
       await expect(fs.stat(marker)).rejects.toThrow();
       await expect(fs.readFile(outputPath, "utf8")).resolves.toBe(payload);
     } finally {
@@ -514,13 +437,7 @@ process.exitCode = ${code};
           }],
         },
       }));
-      await expect(invokeBundleHooks({
-        rootDir,
-        installDir: path.join(rootDir, "hermes"),
-        python: "python3",
-        timeoutMs: fixtureTimeoutMs,
-        env: {},
-      }, "PreToolUse", { tool_input: { text: "ok" } })).resolves.toEqual([
+      await expect(invokeBundleHooks(hookConfig(rootDir), "PreToolUse", { tool_input: { text: "ok" } })).resolves.toEqual([
         { systemMessage: "kept", decision: "block", reason: "earlier hook", hookSpecificOutput: { updatedInput: { text: "rewritten" } } },
         { decision: "block", reason: expect.stringContaining("command expansion failed") },
         { decision: "block", reason: "rewritten" },
@@ -550,7 +467,7 @@ process.exitCode = ${code};
       const manifest = path.join(plugin, ".codex-plugin", "plugin.json");
       await fs.writeFile(path.join(plugin, "later.mjs"),
         'process.stdin.resume(); process.stdin.on("end", () => console.log(JSON.stringify({systemMessage:"later"})));');
-      const config = { rootDir, installDir: path.join(rootDir, "hermes"), python: "python3", timeoutMs: fixtureTimeoutMs, env: {} };
+      const config = hookConfig(rootDir);
       for (const event of ["PreToolUse", "UserPromptSubmit", "Stop", "PostToolUse"]) {
         const expected = event === "PostToolUse" ? [] : [{
           decision: "block", reason: expect.stringContaining("BABELFISH_TEST_UNSET"),
@@ -574,9 +491,7 @@ process.exitCode = ${code};
   }, 30_000);
 
   it.each([false, true])("passes pre-tool rewrites to subsequent hooks (diagnostic prefix: %s)", async (logFirst) => {
-    const rootDir = await tempDir("babelfish-root-");
-    const pluginRoot = path.join(rootDir, "codex", "fixture");
-    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    const { pluginRoot, config, writeHooks } = await codexHookFixture();
     await fs.writeFile(
       path.join(pluginRoot, "rewrite.mjs"),
       [
@@ -588,14 +503,10 @@ process.exitCode = ${code};
       path.join(pluginRoot, "validate.mjs"),
       "let input=''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => { const event=JSON.parse(input); if(event.tool_input.value===2){ console.error('rewritten input blocked'); process.exit(2); } });",
     );
-    await fs.writeFile(
-      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
-      JSON.stringify({ hooks: { PreToolUse: [{ hooks: [
-        { type: "command", command: "node rewrite.mjs" },
-        { type: "command", command: "node validate.mjs" },
-      ] }] } }),
-    );
-    const config = { rootDir, installDir: path.join(rootDir, "hermes"), python: "python3", timeoutMs: fixtureTimeoutMs, env: {} };
+    await writeHooks({ PreToolUse: [{ hooks: [
+      { type: "command", command: "node rewrite.mjs" },
+      { type: "command", command: "node validate.mjs" },
+    ] }] });
     await expect(invokeBundleHooks(config, "PreToolUse", { tool_input: { value: 1 } })).resolves.toEqual([
       { hookSpecificOutput: { updatedInput: { value: 2 } } },
       { decision: "block", reason: "rewritten input blocked" },
@@ -610,7 +521,7 @@ process.exitCode = ${code};
       path.join(pluginRoot, ".claude-plugin", "plugin.json"),
       JSON.stringify({ hooks: { hooks: { UserPromptSubmit: [{ hooks: [{ type: "prompt", prompt: "Check $ARGUMENTS" }] }] } } }),
     );
-    const config = { rootDir, installDir: path.join(rootDir, "hermes"), python: "python3", timeoutMs: fixtureTimeoutMs, env: {} };
+    const config = hookConfig(rootDir);
     const evaluate = vi.fn(async () => ({ decision: "block", reason: "model denied" }));
     await expect(invokeBundleHooks(config, "UserPromptSubmit", { prompt: "deny" }, "", evaluate))
       .resolves.toEqual([{ decision: "block", reason: "model denied" }]);
@@ -781,9 +692,7 @@ process.exitCode = ${code};
   });
 
   it("treats status 2 as a block and successful text output as a no-op", async () => {
-    const rootDir = await tempDir("babelfish-root-");
-    const pluginRoot = path.join(rootDir, "codex", "fixture");
-    await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    const { pluginRoot, config, writeHooks } = await codexHookFixture();
     await fs.writeFile(
       path.join(pluginRoot, "pre-block.mjs"),
       "console.error('blocked'); process.exit(2);",
@@ -794,16 +703,12 @@ process.exitCode = ${code};
       "console.log('diagnostic');",
     );
     await fs.writeFile(path.join(pluginRoot, "fail.mjs"), "process.exit(1);");
-    await fs.writeFile(
-      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
-      JSON.stringify({ hooks: {
-        PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "node pre-block.mjs" }] }],
-        Stop: [{ hooks: [{ type: "command", command: "node stop-block.mjs" }] }],
-        SessionStart: [{ hooks: [{ type: "command", command: "node diagnostic.mjs" }] }],
-        SessionEnd: [{ hooks: [{ type: "command", command: "node fail.mjs" }] }],
-      } }),
-    );
-    const config = { rootDir, installDir: path.join(rootDir, "hermes"), python: "python3", timeoutMs: fixtureTimeoutMs, env: {} };
+    await writeHooks({
+      PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "node pre-block.mjs" }] }],
+      Stop: [{ hooks: [{ type: "command", command: "node stop-block.mjs" }] }],
+      SessionStart: [{ hooks: [{ type: "command", command: "node diagnostic.mjs" }] }],
+      SessionEnd: [{ hooks: [{ type: "command", command: "node fail.mjs" }] }],
+    });
     await expect(invokeBundleHooks(config, "PreToolUse", {}, "Read")).resolves.toEqual([]);
     await expect(invokeBundleHooks(config, "PreToolUse", {}, "Bash")).resolves.toEqual([
       { decision: "block", reason: "blocked" },
