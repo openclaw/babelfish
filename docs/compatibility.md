@@ -33,7 +33,7 @@ Bundle paths must stay inside the plugin root, including after resolving skill-r
 | Subagent lifecycle hooks | Full | Full | Full | Mapped to OpenClaw subagent start/end hooks |
 | Prompt or agent hook handlers | N/A | No | Partial | Claude prompt handlers use the active OpenClaw model; Codex prompt handlers and multi-turn agent handlers remain listed only |
 | Notification hooks | N/A | N/A | No | Detected but not executed |
-| Tool-result middleware | Full | N/A | N/A | Maps to OpenClaw tool-result middleware |
+| Tool-result transforms | Partial | N/A | N/A | `transform_tool_result` receives the serialized OpenClaw result and the session identifier. Its first string replaces the result, including an empty string. OpenClaw exposes no terminal stdout event for `transform_terminal_output`. |
 | LLM/request/execution middleware | Partial | N/A | N/A | Request rewrites of OpenClaw system/context fields map to prompt-build hooks; provider and execution wrappers are reported but not run |
 | Codex app connectors | N/A | No | N/A | Connector IDs are not MCP servers and have no current equivalent |
 | LSP servers | N/A | N/A | No | Detected but not started |
@@ -103,6 +103,8 @@ export OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR=/path/to/plugins
 export OPENCLAW_BABELFISH_HERMES_PYTHON=/path/to/python3
 export OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS=120000
 ```
+
+Hermes deadlines above the maximum Node timer of 2,147,483,647 ms use the default 120 seconds.
 
 Compatible lifecycle, tool, message, run, subagent, and middleware callbacks map to their matching OpenClaw hooks. Unmatched approval, kanban, execution, LLM request, and output-transform callbacks produce startup warnings.
 

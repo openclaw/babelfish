@@ -592,18 +592,21 @@ describe("Stop hook finalization", () => {
     const pluginRoot = path.join(bundleRoot, "codex", "stop-hooks");
     await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
     const decisions = Array.isArray(decision) ? decision : [decision];
-    for (const [index, result] of decisions.entries()) {
-      await fs.writeFile(
-        path.join(pluginRoot, `hook-${index}.mjs`),
-        `process.stdin.resume(); process.stdin.on("end", () => { console.log(${JSON.stringify(JSON.stringify(result))}); process.exitCode = ${options.exitCode ?? 0}; });`,
-      );
-    }
+    await fs.writeFile(path.join(pluginRoot, "decisions.json"), JSON.stringify(decisions));
+    await fs.writeFile(path.join(pluginRoot, "hook.mjs"), `
+      import decisions from "./decisions.json" with { type: "json" };
+      process.stdin.resume();
+      process.stdin.on("end", () => {
+        console.log(JSON.stringify(decisions[process.argv[2]]));
+        process.exitCode = Number(process.argv[3]);
+      });
+    `);
     await fs.writeFile(
       path.join(pluginRoot, ".codex-plugin", "plugin.json"),
       JSON.stringify({
         hooks: { [options.hookEvent ?? "Stop"]: [{ hooks: decisions.map((_, index) => ({
           type: "command",
-          command: [process.execPath, `hook-${index}.mjs`],
+          command: [process.execPath, "hook.mjs", String(index), String(options.exitCode ?? 0)],
         })) }] },
       }),
     );
@@ -633,10 +636,11 @@ describe("Stop hook finalization", () => {
   });
 
   it("revises when a Stop hook sets decision block", async () => {
-    await expect(finalize({ decision: "block", reason: "tests failed" })).resolves.toEqual({
+    const reason = 'tests failed in "stop hook"\nsee details';
+    await expect(finalize({ decision: "block", reason })).resolves.toEqual({
       action: "revise",
-      reason: "tests failed",
-      retry: { instruction: "tests failed" },
+      reason,
+      retry: { instruction: reason },
     });
   });
 
