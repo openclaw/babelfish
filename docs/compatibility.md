@@ -134,7 +134,9 @@ This mode covers Hermes plugins only. It does not provide Babelfish's native Ope
 Hermes MCP command tools accept an optional string `args` field. Omitting the
 `arguments` object, passing `{}`, or passing `{ "args": "" }` sends an empty
 string to the command handler. Explicit text is preserved. This matches the
-default for command calls through `babelfish_task_start`.
+default for command calls through `babelfish_task_start`. If an imported command
+or tool handler fails, the MCP result carries `isError: true` and the error
+message. Calling an unknown tool returns the JSON-RPC error `-32602`.
 
 Configure an MCP client to launch:
 

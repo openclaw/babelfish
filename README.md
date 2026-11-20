@@ -50,6 +50,7 @@ Installing an already installed name requires `--force`; a rejected duplicate le
 | Session monitors | Always-on Claude monitors keep at most 50 stdout lines and 1 MiB of queued context per session. A line over 1 MiB stops that monitor; consumed output does not count against future turns. |
 | Hook command expansion | An unresolved variable blocks PreToolUse, UserPromptSubmit, and Stop decisions while preserving earlier results and running later hooks. Observer expansion failures warn and continue. The POSIX shell expands bare and double-quoted references; Babelfish inserts single-quoted and escaped references as literal values, preserving installed deny guards. Windows retains native `cmd.exe` expansion semantics. Execution-error handling is unchanged. |
 | Stop hook decisions | On upgrade, installed Claude Code and Codex Stop hooks with `continue: false` finish the turn rather than request revision. This takes precedence over a block on the same hook only; a separate blocking hook still requests revision in either order. Pre-tool and prompt blocking is unchanged. |
+| Hermes MCP errors | Command and tool handler failures return a tool result with `isError: true`. Unknown tool names return JSON-RPC error `-32602`. |
 | Unsupported behavior | Recorded during generation and reported at Gateway startup |
 
 Support differs by source app and surface. See the [compatibility reference](docs/compatibility.md) for the full matrix, source-specific behavior, configuration, and example plugins.
