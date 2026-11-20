@@ -1,3 +1,4 @@
+import { registerTestHooks } from "../test/register-hooks.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -29,12 +30,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      registerTestHooks(entry, hooks);
       await expect(hooks.get("before_tool_call")!({ toolName: "fixture", params: {} }, { sessionId: "guard" }))
         .resolves.toEqual({ block: true, blockReason: "imported guard" });
     } finally {
@@ -58,12 +54,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      registerTestHooks(entry, hooks);
       const first = { sessionId: "first" };
       const second = { sessionId: "second" };
       await hooks.get("session_start")!({}, first);
@@ -99,14 +90,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined,
-        registerCommand: () => undefined,
-        registerCli: () => undefined,
-        registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      registerTestHooks(entry, hooks);
       const result = await hooks.get(handlerName)?.({ toolName: "fixture" }, {});
       expect(result).toMatchObject(expected);
       expect(JSON.stringify(result)).toContain("command expansion failed");
@@ -429,14 +413,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       hooks = new Map();
-      entry.register({
-        on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => { hooks.set(name, handler); },
-        registerTool: () => undefined,
-        registerCommand: () => undefined,
-        registerCli: () => undefined,
-        registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      registerTestHooks(entry, hooks);
       await hooks.get("session_start")?.(
         { sessionId: "shell-monitor" },
         { sessionId: "shell-monitor", workspaceDir: workspace },
@@ -568,14 +545,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       hooks = new Map();
-      entry.register({
-        on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => { hooks.set(name, handler); },
-        registerTool: () => undefined,
-        registerCommand: () => undefined,
-        registerCli: () => undefined,
-        registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      registerTestHooks(entry, hooks);
       await hooks.get("session_start")?.(
         { sessionId: "line-monitor" },
         { sessionId: "line-monitor", workspaceDir: root },
@@ -632,12 +602,7 @@ describe("native OpenClaw hook entry", () => {
       await fs.writeFile(path.join(plugin, "monitors", "monitors.json"), JSON.stringify([{ name: "status", description: "Status", command }]));
       vi.resetModules();
       const entry = (await import("./index.js")).default;
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn },
-      });
+      registerTestHooks(entry, hooks, warn);
       const ctx = { sessionId: "turn-monitor", workspaceDir: root };
       await hooks.get("session_start")?.({}, ctx);
       for (let turn = 1; turn <= 2; turn += 1) {
@@ -692,14 +657,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       hooks = new Map();
-      entry.register({
-        on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => { hooks.set(name, handler); },
-        registerTool: () => undefined,
-        registerCommand: () => undefined,
-        registerCli: () => undefined,
-        registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn },
-      });
+      registerTestHooks(entry, hooks, warn);
       await hooks.get("session_start")?.(
         { sessionId: "prefix-monitor" },
         { sessionId: "prefix-monitor", workspaceDir: root },

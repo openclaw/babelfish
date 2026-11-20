@@ -1,3 +1,4 @@
+import { registerTestHooks } from "../test/register-hooks.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -36,12 +37,7 @@ describe("rejected session start", () => {
     const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
     try {
       const entry = (await import("./index.js")).default;
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      registerTestHooks(entry, hooks);
       const session = { sessionId: "replaced" };
       await hooks.get("session_start")!({}, session);
       const ending = hooks.get(eventName)!({}, session);
@@ -99,12 +95,7 @@ describe("rejected session start", () => {
     const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
     try {
       const entry = (await import("./index.js")).default;
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      registerTestHooks(entry, hooks);
       const session = { sessionId: "lifecycle" };
       let start = hooks.get("session_start")!({}, session);
       if (mode === "replacement") await start;
@@ -157,12 +148,7 @@ describe("rejected session start", () => {
       ].join("\n"));
       vi.resetModules();
       const entry = (await import("./index.js")).default;
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      registerTestHooks(entry, hooks);
       const start = hooks.get("session_start")!({}, session);
       const prepare = hooks.get("agent_turn_prepare")!({}, session);
       await expect(prepare).resolves.toEqual({ prependContext: "initialized" });
