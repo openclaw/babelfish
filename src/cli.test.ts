@@ -17,7 +17,7 @@ beforeEach(async () => {
   vi.stubEnv("OPENCLAW_BABELFISH_ROOT", path.join(root, "apps"));
   vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "hermes"));
   vi.stubEnv("OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS", undefined);
-  vi.stubEnv("GIT_CONFIG_GLOBAL", os.devNull);
+  vi.stubEnv("GIT_CONFIG_GLOBAL", path.join(root, "gitconfig"));
   vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
 });
 afterEach(async () => {

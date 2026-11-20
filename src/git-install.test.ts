@@ -48,8 +48,9 @@ describe("repoNameFromSource", () => {
 });
 
 describe("plugin lifecycle", () => {
-  beforeEach(() => {
-    vi.stubEnv("GIT_CONFIG_GLOBAL", os.devNull);
+  beforeEach(async () => {
+    const configDir = await tempDir("babelfish-git-config-");
+    vi.stubEnv("GIT_CONFIG_GLOBAL", path.join(configDir, "gitconfig"));
     vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
   });
   afterEach(() => vi.unstubAllEnvs());
