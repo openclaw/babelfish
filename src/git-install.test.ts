@@ -4,6 +4,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { tempDir } from "../test/temp-dir.js";
 import {
   installPlugin,
   repoNameFromSource,
@@ -47,6 +48,13 @@ describe("repoNameFromSource", () => {
 });
 
 describe("plugin lifecycle", () => {
+  beforeEach(async () => {
+    const configDir = await tempDir("babelfish-git-config-");
+    vi.stubEnv("GIT_CONFIG_GLOBAL", path.join(configDir, "gitconfig"));
+    vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
   it.each([false, true])("cleans up a timed-out clone and preserves existing state (force=%s)", async (force) => {
     const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-timeout-"));
     const target = path.join(installDir, "plugin");
@@ -111,7 +119,7 @@ describe("plugin lifecycle", () => {
   });
 
   it("installs a bundle validated by its caller", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-install-"));
+    const root = await tempDir("babelfish-install-");
     const installDir = path.join(root, "installed");
     const source = path.join(root, "source");
     await fs.mkdir(path.join(source, ".codex-plugin"), { recursive: true });
@@ -127,7 +135,7 @@ describe("plugin lifecycle", () => {
   });
 
   it("keeps an existing plugin when a forced clone fails", async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-install-"));
+    const installDir = await tempDir("babelfish-install-");
     const target = path.join(installDir, "existing");
     await fs.mkdir(target);
     await fs.writeFile(path.join(target, "marker"), "kept");
@@ -145,7 +153,7 @@ describe("plugin lifecycle", () => {
   });
 
   it("keeps an existing plugin when the replacement is not a supported plugin", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-install-"));
+    const root = await tempDir("babelfish-install-");
     const installDir = path.join(root, "installed");
     const source = path.join(root, "source");
     const target = path.join(installDir, "existing");
@@ -177,7 +185,7 @@ describe("plugin lifecycle", () => {
   });
 
   it("restores the previous plugin when regeneration fails", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-install-"));
+    const root = await tempDir("babelfish-install-");
     const installDir = path.join(root, "installed");
     const source = path.join(root, "source");
     const target = path.join(installDir, "existing");
@@ -216,7 +224,7 @@ describe("plugin lifecycle", () => {
   });
 
   it("restores an uninstalled plugin when regeneration fails", async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-install-"));
+    const installDir = await tempDir("babelfish-install-");
     const target = path.join(installDir, "existing");
     await fs.mkdir(target);
     await fs.writeFile(path.join(target, "marker"), "kept");

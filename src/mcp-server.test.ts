@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { tempDir } from "../test/temp-dir.js";
 import { build } from "esbuild";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -245,7 +246,7 @@ describe("Hermes MCP server", () => {
   });
 
   it("serves installed Hermes tools over MCP", { timeout: 15_000 }, async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-"));
+    const installDir = await tempDir("openclaw-hermes-mcp-");
     await copyFixture(installDir);
 
     const server = createHermesMcpServer({
@@ -289,7 +290,7 @@ describe("Hermes MCP server", () => {
     });
 
     const server = createHermesMcpServer({
-      installDir: await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-cap-")),
+      installDir: await tempDir("openclaw-hermes-mcp-cap-"),
       python: "python3",
       timeoutMs: 10000,
       env: {},
@@ -363,7 +364,7 @@ describe("Hermes MCP server", () => {
     });
 
     const server = createHermesMcpServer({
-      installDir: await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-publish-")),
+      installDir: await tempDir("openclaw-hermes-mcp-publish-"),
       python: "python3",
       timeoutMs: 10000,
       env: {},
