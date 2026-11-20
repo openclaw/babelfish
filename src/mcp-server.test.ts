@@ -136,7 +136,7 @@ async function stopTasksAndKill(
 }
 
 describe("Hermes MCP server", () => {
-  it("preserves optional command arguments through built stdio", { timeout: 30_000 }, async () => {
+  it("runs commands and background tasks through built stdio", { timeout: 30_000 }, async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-command-stdio-"));
     const installDir = path.join(root, "plugins");
     const runtime = path.join(root, "runtime");
@@ -178,22 +178,22 @@ describe("Hermes MCP server", () => {
         expect(result.isError).toBeFalsy();
         expect(JSON.parse(String(result.content?.[0]?.text))).toEqual({ command: args?.args ?? "" });
       }
-      const started = await client.callTool({
-        name: "babelfish_task_start",
-        arguments: { kind: "command", plugin: "simple", name: "simple" },
-      });
-      expect(started.isError).toBeFalsy();
-      const task = JSON.parse(String(started.content?.[0]?.text));
-      let status = task;
-      for (let attempt = 0; attempt < 100 && status.status === "running"; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        const result = await client.callTool({ name: "babelfish_task_status", arguments: { id: task.id } });
-        status = JSON.parse(String(result.content?.[0]?.text));
+      // Real background tasks hold process-wide slots until their Python children exit.
+      for (const [args, expected] of [
+        [{ kind: "command", plugin: "simple", name: "simple" }, { command: "simple", result: { command: "" } }],
+        [{ kind: "tool", name: "simple_echo", args: { value: "task-ok" } }, { tool: "simple_echo", parsedResult: { echo: "task-ok" } }],
+      ] as const) {
+        const started = await client.callTool({ name: "babelfish_task_start", arguments: args });
+        expect(started.isError).toBeFalsy();
+        const task = JSON.parse(String(started.content?.[0]?.text));
+        expect(task.status).toBe("running");
+        const final = await vi.waitUntil(async () => {
+          const result = await client.callTool({ name: "babelfish_task_status", arguments: { id: task.id } });
+          const status = JSON.parse(String(result.content?.[0]?.text));
+          return status.status === "running" ? undefined : status;
+        }, { timeout: 5_000, interval: 50 });
+        expect(final).toMatchObject({ status: "completed", result: { plugin: "simple", ...expected } });
       }
-      expect(status).toMatchObject({
-        status: "completed",
-        result: { plugin: "simple", command: "simple", result: { command: "" } },
-      });
     } finally {
       await client.close();
       await fs.rm(root, { recursive: true, force: true });
@@ -278,24 +278,6 @@ describe("Hermes MCP server", () => {
         arguments: { value: "mcp-ok" },
       });
       expect(result.content).toEqual([{ type: "text", text: '{\n  "echo": "mcp-ok"\n}' }]);
-
-      const started = await client.callTool({
-        name: "babelfish_task_start",
-        arguments: { kind: "tool", name: "simple_echo", args: { value: "task-ok" } },
-      });
-      const task = JSON.parse(String(started.content?.[0]?.text));
-      expect(task.status).toBe("running");
-
-      let finalStatus = "running";
-      for (let attempt = 0; attempt < 100 && finalStatus === "running"; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        const status = await client.callTool({
-          name: "babelfish_task_status",
-          arguments: { id: task.id },
-        });
-        finalStatus = JSON.parse(String(status.content?.[0]?.text)).status;
-      }
-      expect(finalStatus).toBe("completed");
     } finally {
       await client.close();
       await server.close();
