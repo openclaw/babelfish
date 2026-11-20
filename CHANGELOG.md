@@ -24,6 +24,8 @@
 - Update the pinned CodeQL actions to 4.39.0 for repository security scanning. Thanks @dependabot.
 - Run macOS CI on the Apple Silicon Xcode 27 image while retaining Node.js 22.19 support.
 
+- Pass Hermes tool-result hooks the serialized result and session identifier, honor empty replacements, and warn when a plugin requests the terminal-only output hook.
+
 ## 0.1.2 — 2026-10-17
 
 **Highlights:** Preserve literal shell values and installed deny guards; security hardening bounds retained monitor output to prevent unbounded memory growth.
