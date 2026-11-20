@@ -1,3 +1,4 @@
+import { hermesPlugin, hermesTool } from "../test/hermes-tool-fixtures.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -166,65 +167,11 @@ await server.connect(new StdioServerTransport());
     const tools = buildNativeToolEntries({
       installDir: "/tmp/hermes",
       plugins: [
-        {
-          key: "a.b",
-          name: "A",
-          version: "",
-          description: "",
-          path: "/tmp/hermes/a.b",
-          tools: [
-            {
-              name: "shared",
-              toolset: "a",
-              description: "",
-              schema: {},
-              isAsync: false,
-              requiresEnv: [],
-              available: true,
-            },
-          ],
-          hooks: [],
-          middleware: [],
-          commands: [],
-          cliCommands: [],
-          skills: [],
-          auxiliaryTasks: [],
-          unsupported: [],
-        },
-        {
-          key: "a_b",
-          name: "B",
-          version: "",
-          description: "",
-          path: "/tmp/hermes/a_b",
-          tools: [
-            {
-              name: "shared",
-              toolset: "b",
-              description: "",
-              schema: {},
-              isAsync: false,
-              requiresEnv: [],
-              available: true,
-            },
-            {
-              name: "a_b__shared",
-              toolset: "b",
-              description: "",
-              schema: {},
-              isAsync: false,
-              requiresEnv: [],
-              available: true,
-            },
-          ],
-          hooks: [],
-          middleware: [],
-          commands: [],
-          cliCommands: [],
-          skills: [],
-          auxiliaryTasks: [],
-          unsupported: [],
-        },
+        hermesPlugin("a.b", [hermesTool("shared", { toolset: "a", schema: {} })]),
+        hermesPlugin("a_b", [
+          hermesTool("shared", { toolset: "b", schema: {} }),
+          hermesTool("a_b__shared", { toolset: "b", schema: {} }),
+        ]),
       ],
     });
 

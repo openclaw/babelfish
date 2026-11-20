@@ -1,3 +1,4 @@
+import { hermesPlugin, hermesTool } from "../test/hermes-tool-fixtures.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -204,72 +205,12 @@ describe("Hermes MCP server", () => {
     const index = buildHermesMcpToolIndex({
       installDir: "/tmp/hermes",
       plugins: [
-        {
-          key: "one",
-          name: "one",
-          version: "",
-          description: "",
-          path: "/tmp/hermes/one",
-          tools: [
-            {
-              name: "shared",
-              toolset: "one",
-              description: "one shared",
-              schema: { parameters: { type: "object", properties: {} } },
-              isAsync: false,
-              requiresEnv: [],
-              available: true,
-            },
-            {
-              name: "unique",
-              toolset: "one",
-              description: "unique",
-              schema: { parameters: { type: "object", properties: {} } },
-              isAsync: false,
-              requiresEnv: [],
-              available: true,
-            },
-            {
-              name: "unavailable",
-              toolset: "one",
-              description: "unavailable",
-              schema: { parameters: { type: "object", properties: {} } },
-              isAsync: false,
-              requiresEnv: ["MISSING"],
-              available: false,
-            },
-          ],
-          hooks: [],
-          middleware: [],
-          commands: [],
-          cliCommands: [],
-          skills: [],
-          unsupported: [],
-        },
-        {
-          key: "two",
-          name: "two",
-          version: "",
-          description: "",
-          path: "/tmp/hermes/two",
-          tools: [
-            {
-              name: "shared",
-              toolset: "two",
-              description: "two shared",
-              schema: { parameters: { type: "object", properties: {} } },
-              isAsync: false,
-              requiresEnv: [],
-              available: true,
-            },
-          ],
-          hooks: [],
-          middleware: [],
-          commands: [],
-          cliCommands: [],
-          skills: [],
-          unsupported: [],
-        },
+        hermesPlugin("one", [
+          hermesTool("shared", { toolset: "one", description: "one shared" }),
+          hermesTool("unique", { toolset: "one" }),
+          hermesTool("unavailable", { toolset: "one", available: false, requiresEnv: ["MISSING"] }),
+        ]),
+        hermesPlugin("two", [hermesTool("shared", { toolset: "two", description: "two shared" })]),
       ],
     });
 
@@ -277,34 +218,9 @@ describe("Hermes MCP server", () => {
   });
 
   it("suffixes collisions after plugin names are sanitized", () => {
-    const plugin = (key: string) => ({
-      key,
-      name: key,
-      version: "",
-      description: "",
-      path: `/tmp/${key}`,
-      tools: [
-        {
-          name: "shared",
-          toolset: key,
-          description: "shared",
-          schema: { parameters: { type: "object", properties: {} } },
-          isAsync: false,
-          requiresEnv: [],
-          available: true,
-        },
-      ],
-      hooks: [],
-      middleware: [],
-      commands: [],
-      cliCommands: [],
-      skills: [],
-      auxiliaryTasks: [],
-      unsupported: [],
-    });
     const index = buildHermesMcpToolIndex({
       installDir: "/tmp/plugins",
-      plugins: [plugin("a.b"), plugin("a_b")],
+      plugins: ["a.b", "a_b"].map((key) => hermesPlugin(key, [hermesTool("shared", { toolset: key })])),
     });
 
     expect(index.tools.map((tool) => tool.name)).toEqual(["a_b__shared", "a_b__shared_2"]);
