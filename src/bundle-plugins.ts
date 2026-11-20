@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { asObject, type JsonObject } from "./json.js";
 import type { BabelfishConfig, SupportedApp } from "./config.js";
 import { appInstallDir } from "./config.js";
@@ -552,26 +553,24 @@ function httpHeaders(config: JsonObject, pluginRoot: string): Record<string, str
   return headers;
 }
 
-async function withTimeout<T>(run: Promise<T>, timeoutMs: number, onTimeout: () => void): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      run,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          onTimeout();
-          reject(new Error(`MCP operation timed out after ${timeoutMs}ms`));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
+function connectWithTimeout(client: Client, transport: Transport, timeoutMs: number): Promise<void> {
+  const connecting = client.connect(transport);
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      void client.close();
+      reject(new Error(`MCP operation timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  return Promise.race([connecting, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function clientFor(plugin: BundlePlugin, server: BundleServer, timeoutMs: number): Promise<Client> {
+async function withBundleClient<T>(
+  plugin: BundlePlugin,
+  server: BundleServer,
+  timeoutMs: number,
+  operation: (client: Client) => Promise<T>,
+): Promise<T> {
   const [{ Client }, { SSEClientTransport }, { StdioClientTransport }, { StreamableHTTPClientTransport }] = await Promise.all([
     import("@modelcontextprotocol/sdk/client/index.js"),
     import("@modelcontextprotocol/sdk/client/sse.js"),
@@ -579,6 +578,15 @@ async function clientFor(plugin: BundlePlugin, server: BundleServer, timeoutMs: 
     import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
   ]);
   const client = new Client({ name: "babelfish", version: "0.1.2" });
+  async function run(transport: Transport): Promise<T> {
+    await connectWithTimeout(client, transport, timeoutMs);
+    try {
+      return await operation(client);
+    } finally {
+      await client.close();
+    }
+  }
+
   const raw = server.config;
   const url = typeof raw.url === "string" ? expandRoot(raw.url, plugin.path) : undefined;
   if (url) {
@@ -593,8 +601,7 @@ async function clientFor(plugin: BundlePlugin, server: BundleServer, timeoutMs: 
     const transport = raw.type === "sse"
       ? new SSEClientTransport(new URL(url), { eventSourceInit, requestInit })
       : new StreamableHTTPClientTransport(new URL(url), { requestInit });
-    await withTimeout(client.connect(transport), timeoutMs, () => void client.close());
-    return client;
+    return run(transport);
   }
   if (typeof raw.command !== "string") {
     throw new Error(`MCP server ${server.name} has no command or URL.`);
@@ -628,8 +635,7 @@ async function clientFor(plugin: BundlePlugin, server: BundleServer, timeoutMs: 
     } as Record<string, string>,
     stderr: "inherit",
   });
-  await withTimeout(client.connect(transport), timeoutMs, () => void client.close());
-  return client;
+  return run(transport);
 }
 
 export async function inspectBundleServer(
@@ -637,8 +643,7 @@ export async function inspectBundleServer(
   server: BundleServer,
   timeoutMs: number,
 ) {
-  const client = await clientFor(plugin, server, timeoutMs);
-  try {
+  return withBundleClient(plugin, server, timeoutMs, async (client) => {
     const advertised = client.getServerCapabilities();
     const capabilities = {
       tools: Boolean(advertised?.tools),
@@ -675,9 +680,7 @@ export async function inspectBundleServer(
       } while (cursor);
     }
     return { capabilities, tools };
-  } finally {
-    await client.close();
-  }
+  });
 }
 
 export async function callBundleTool(
@@ -688,12 +691,8 @@ export async function callBundleTool(
   signal?: AbortSignal,
   timeoutMs = 120_000,
 ) {
-  const client = await clientFor(plugin, server, timeoutMs);
-  try {
-    return await client.callTool({ name: tool, arguments: args }, undefined, { signal, timeout: timeoutMs });
-  } finally {
-    await client.close();
-  }
+  return withBundleClient(plugin, server, timeoutMs, (client) =>
+    client.callTool({ name: tool, arguments: args }, undefined, { signal, timeout: timeoutMs }));
 }
 
 export async function callBundleMcp(
@@ -704,21 +703,16 @@ export async function callBundleMcp(
   signal?: AbortSignal,
   timeoutMs = 120_000,
 ) {
-  const client = await clientFor(plugin, server, timeoutMs);
-  try {
-    if (operation === "listResources") {
-      return await client.listResources(params, { signal, timeout: timeoutMs });
+  const options = { signal, timeout: timeoutMs };
+  return withBundleClient(plugin, server, timeoutMs, async (client) => {
+    if (operation === "listResources" || operation === "listPrompts") {
+      return client[operation](params, options);
     }
     if (operation === "readResource") {
-      return await client.readResource(params as { uri: string }, { signal, timeout: timeoutMs });
+      return client.readResource(params as { uri: string }, options);
     }
-    if (operation === "listPrompts") {
-      return await client.listPrompts(params, { signal, timeout: timeoutMs });
-    }
-    return await client.getPrompt(params as { name: string; arguments?: Record<string, string> }, { signal, timeout: timeoutMs });
-  } finally {
-    await client.close();
-  }
+    return client.getPrompt(params as { name: string; arguments?: Record<string, string> }, options);
+  });
 }
 
 function matcherMatches(matcher: string | undefined, value: string): boolean {

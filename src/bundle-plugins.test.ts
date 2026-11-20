@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { setImmediate as nextTurn } from "node:timers/promises";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { tempDir } from "../test/temp-dir.js";
 import {
+  callBundleMcp,
+  callBundleTool,
   hookAdditionalContext,
   hookBlock,
   hookUpdatedInput,
@@ -852,12 +855,55 @@ function bundlePlugin(root: string): BundlePlugin {
   };
 }
 
-async function writePagerServer(
-  root: string,
+describe("bundle MCP client lifetime", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    { method: "listTools", config: { command: "unused" } },
+    { method: "callTool", config: { url: "https://example.invalid/mcp" } },
+    { method: "listPrompts", config: { type: "sse", url: "https://example.invalid/events" } },
+  ] as const)("enforces the connect deadline and closes after a failed $method request", async ({ method, config }) => {
+    const root = await tempDir("babelfish-client-");
+    const plugin = bundlePlugin(root);
+    const server: BundleServer = { name: "fixture", baseDir: root, config };
+    const connect = vi.spyOn(Client.prototype, "connect").mockResolvedValue();
+    vi.spyOn(Client.prototype, "getServerCapabilities").mockReturnValue({ tools: {} });
+    const order: string[] = [];
+    const failure = new Error("request failed");
+    const request = vi.spyOn(Client.prototype, method).mockImplementation(async () => {
+      await nextTurn();
+      order.push("request failed");
+      throw failure;
+    });
+    const close = vi.spyOn(Client.prototype, "close").mockImplementation(async () => {
+      order.push("closing");
+      await nextTurn();
+      order.push("closed");
+    });
+
+    const timeoutMs = 50;
+    const calls = {
+      listTools: () => inspectBundleServer(plugin, server, timeoutMs),
+      callTool: () => callBundleTool(plugin, server, "echo", {}, undefined, timeoutMs),
+      listPrompts: () => callBundleMcp(plugin, server, "listPrompts", {}, undefined, timeoutMs),
+    };
+    await expect(calls[method]()).rejects.toBe(failure);
+    expect(order).toEqual(["request failed", "closing", "closed"]);
+
+    connect.mockImplementationOnce(() => new Promise(() => {}));
+    close.mockResolvedValueOnce();
+    await expect(calls[method]()).rejects.toThrow(`MCP operation timed out after ${timeoutMs}ms`);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(2);
+  });
+});
+
+async function inspectPager(
   mode: "repeat" | "increment" | "two-page" | "slow-increment" | "fifty-page",
-): Promise<BundleServer> {
-  const sdk = path.join(process.cwd(), "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
-  const sdkUrl = (file: string) => pathToFileURL(path.join(sdk, file)).href;
+  timeoutMs = 10_000,
+) {
+  const root = await tempDir("babelfish-pager-");
+  const sdkUrl = (file: string) => import.meta.resolve(`@modelcontextprotocol/sdk/${file}`);
   await fs.writeFile(
     path.join(root, "pager.mjs"),
     `import { Server } from ${JSON.stringify(sdkUrl("server/index.js"))};
@@ -890,50 +936,34 @@ server.setRequestHandler(ListToolsRequestSchema, async (request) => {
 await server.connect(new StdioServerTransport());
 `,
   );
-  return {
+  return inspectBundleServer(bundlePlugin(root), {
     name: "pager",
     config: { command: "node", args: ["pager.mjs"] },
     baseDir: root,
-  };
+  }, timeoutMs);
 }
 
 describe("inspectBundleServer tools/list pagination", () => {
   it("collects tools across a finite cursor page", async () => {
-    const root = await tempDir("babelfish-pager-");
-    const server = await writePagerServer(root, "two-page");
-    const inspection = await inspectBundleServer(bundlePlugin(root), server, 10_000);
+    const inspection = await inspectPager("two-page");
     expect(inspection.tools.map((tool) => tool.name)).toEqual(["alpha", "beta"]);
   }, 15_000);
 
   it("accepts a listing ending on the fiftieth page", async () => {
-    const root = await tempDir("babelfish-pager-");
-    const server = await writePagerServer(root, "fifty-page");
-    const inspection = await inspectBundleServer(bundlePlugin(root), server, 10_000);
+    const inspection = await inspectPager("fifty-page");
     expect(inspection.tools).toHaveLength(50);
     expect(inspection.tools.at(-1)?.name).toBe("tool-50");
   }, 15_000);
 
   it("rejects a repeated tools/list cursor", { timeout: 8_000 }, async () => {
-    const root = await tempDir("babelfish-pager-");
-    const server = await writePagerServer(root, "repeat");
-    await expect(inspectBundleServer(bundlePlugin(root), server, 10_000)).rejects.toThrow(
-      /repeated cursor/i,
-    );
+    await expect(inspectPager("repeat")).rejects.toThrow(/repeated cursor/i);
   });
 
   it("caps tools/list pagination before a unique-cursor loop can grow", { timeout: 8_000 }, async () => {
-    const root = await tempDir("babelfish-pager-");
-    const server = await writePagerServer(root, "increment");
-    await expect(inspectBundleServer(bundlePlugin(root), server, 10_000)).rejects.toThrow(
-      /50 pages/i,
-    );
+    await expect(inspectPager("increment")).rejects.toThrow(/50 pages/i);
   });
 
   it("shares one deadline across tools/list pages", { timeout: 8_000 }, async () => {
-    const root = await tempDir("babelfish-pager-");
-    const server = await writePagerServer(root, "slow-increment");
-    await expect(inspectBundleServer(bundlePlugin(root), server, 1_000)).rejects.toThrow(
-      /timed out/i,
-    );
+    await expect(inspectPager("slow-increment", 1_000)).rejects.toThrow(/timed out/i);
   });
 });
