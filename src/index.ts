@@ -53,6 +53,7 @@ type OpenClawCliProgram = {
   command(name: string): OpenClawCliCommand;
 };
 type OpenClawApi = {
+  registrationMode?: string;
   config?: {
     plugins?: {
       entries?: Record<string, {
@@ -801,12 +802,14 @@ export default {
   name: "Babelfish",
   description: "Use plugins from supported coding and agent apps in OpenClaw.",
   register(api: OpenClawApi): void {
+    registerBabelfishCli(api);
+    registerHermesCliCommands(api);
+    if (api.registrationMode === "cli-metadata") return;
+
     configurePromptHooks(api);
     registerNativeTools(api);
-    registerBabelfishCli(api);
     registerHermesCommands(api);
     registerOutputStyles(api);
-    registerHermesCliCommands(api);
     registerWarnings(api);
     registerToolHooks(api);
     registerRunHooks(api);
