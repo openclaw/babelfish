@@ -142,8 +142,8 @@ await server.connect(new StdioServerTransport());
     const tools = buildNativeToolEntries({
       installDir: "/tmp/hermes",
       plugins: [
-        pluginSummary("a.b", [toolSummary("shared")]),
-        pluginSummary("a_b", [toolSummary("shared"), toolSummary("a_b__shared")]),
+        { ...pluginSummary("a.b", [toolSummary("shared")]), name: "A" },
+        { ...pluginSummary("a_b", [toolSummary("shared"), toolSummary("a_b__shared")]), name: "B" },
       ],
     });
 
