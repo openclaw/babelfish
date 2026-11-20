@@ -318,7 +318,7 @@ function requestLane(request: BridgeRequest): string {
   if (!("context" in request) || !request.context) {
     return "global";
   }
-  return request.context.sessionKey ?? request.context.sessionId ?? request.context.agentId ?? "global";
+  return contextLane(request.context) ?? "global";
 }
 
 function contextLane(context: HermesRuntimeContext): string | undefined {

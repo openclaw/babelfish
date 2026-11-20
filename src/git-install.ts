@@ -129,6 +129,15 @@ export async function validateHermesPluginDirectory(target: string): Promise<voi
   }
 }
 
+async function cleanupStaging(stagingRoot: string): Promise<void> {
+  await fs.rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
+  await fs.rmdir(path.dirname(stagingRoot)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") {
+      throw error;
+    }
+  });
+}
+
 export async function installPlugin({
   installDir,
   source,
@@ -184,12 +193,7 @@ export async function installPlugin({
     await fs.rm(staged, { recursive: true, force: true });
     throw error;
   } finally {
-    await fs.rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
-    await fs.rmdir(path.dirname(stagingRoot)).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") {
-        throw error;
-      }
-    });
+    await cleanupStaging(stagingRoot);
   }
 
   return { name: pluginName, path: target };
@@ -220,12 +224,7 @@ export async function uninstallPlugin({
     await fs.rename(backup, target);
     throw error;
   } finally {
-    await fs.rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
-    await fs.rmdir(path.dirname(stagingRoot)).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") {
-        throw error;
-      }
-    });
+    await cleanupStaging(stagingRoot);
   }
   return { name: pluginName, path: target };
 }
