@@ -40,6 +40,33 @@ it("lists one app or all apps in discovery order", async () => {
   }
 });
 
+it("keeps the installed revision when force is paired with invalid options", async () => {
+  const source = path.join(root, "demo");
+  await fs.mkdir(path.join(source, ".codex-plugin"), { recursive: true });
+  await fs.writeFile(path.join(source, ".codex-plugin", "plugin.json"), "{}");
+  const marker = path.join(source, "revision");
+  await fs.writeFile(marker, "original");
+  await commitFixture(source);
+  await runBabelfishCli(["install", "codex", source]);
+  const installed = path.join(root, "apps", "codex", "demo", "revision");
+
+  await fs.writeFile(marker, "replacement");
+  await commitFixture(source);
+  const invalid: Array<[string[], string]> = [
+    [["--name", "--force"], "--name requires a plugin name"],
+    [["--force", "--name"], "--name requires a plugin name"],
+    [["--force", "--naem", "other"], "Unexpected install argument: --naem"],
+    [["--force", "other"], "Unexpected install argument: other"],
+    [["--force", "--name", "demo", "--name", "other"], "Conflicting --name values"],
+  ];
+  for (const [flags, message] of invalid) {
+    await expect(runBabelfishCli(["install", "codex", source, ...flags])).rejects.toThrow(message);
+    expect(await fs.readFile(installed, "utf8")).toBe("original");
+  }
+  await runBabelfishCli(["install", "codex", source, "--force", "--name", "demo"]);
+  expect(await fs.readFile(installed, "utf8")).toBe("replacement");
+}, 15_000);
+
 describe("babelfish install clone timeout", () => {
   it.each([
     ["--clone-timeout-ms"],

@@ -6,11 +6,13 @@
 
 - Reuse Hermes plugin discovery when generating tools and skills during an install or uninstall.
 
+- Count each monitor output fragment once when enforcing the 1 MiB line limit.
+
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
 - Preserve literal event data in Claude prompt-hook templates and clear evaluation timers when the host fails.
 
-- Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log.
+- Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log. Fixture preparation and each source app's install have separate timings.
 
 - Load the MCP SDK when a client or server starts, reducing startup time for everyday CLI commands and plugin registration.
 
@@ -46,6 +48,8 @@
 - Pass Hermes tool-result hooks the serialized result and session identifier, honor empty replacements, and warn when a plugin requests the terminal-only output hook.
 
 - Report Hermes command handler failures as MCP tool errors and reject unknown tool names with the JSON-RPC invalid-params code.
+
+- Reject malformed install options before cloning so `--force` cannot silently replace a plugin under its source name.
 
 ## 0.1.2 — 2026-10-17
 

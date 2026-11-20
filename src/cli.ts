@@ -9,29 +9,40 @@ import {
 import { listInstalledPlugins } from "./plugin-inventory.js";
 import { regenerateNativeTools } from "./native-tools.js";
 
-function readOptionValue(args: string[], name: string): string | undefined {
-  const index = args.indexOf(name);
-  if (index < 0) {
-    return undefined;
-  }
-  const value = args[index + 1];
-  return value && !value.startsWith("--") ? value : undefined;
-}
-
-function readCloneTimeoutMs(args: string[]): number {
-  const name = "--clone-timeout-ms";
-  let last: number | undefined;
-  for (let i = 0; i < args.length; i += 1) {
-    if (args[i] !== name) {
+function parseInstallOptions(flags: string[]) {
+  let name: string | undefined;
+  let timeoutMs: number | undefined;
+  let force = false;
+  for (let i = 0; i < flags.length; i += 1) {
+    const flag = flags[i];
+    if (flag === "--force") {
+      force = true;
       continue;
     }
-    const value = args[i + 1];
-    if (!value || value.startsWith("--")) {
-      throw new Error(`${name} requires a positive integer millisecond value`);
+    if (flag !== "--name" && flag !== "--clone-timeout-ms") {
+      throw new Error(`Unexpected install argument: ${flag}`);
     }
-    last = resolveCloneTimeoutMs({ cliValue: value });
+    const value = flags[i + 1]?.trim();
+    i += 1;
+    if (!value || value.startsWith("--")) {
+      throw new Error(flag === "--name"
+        ? "--name requires a plugin name"
+        : "--clone-timeout-ms requires a positive integer millisecond value");
+    }
+    if (flag === "--name") {
+      if (name !== undefined && name !== value) {
+        throw new Error("Conflicting --name values");
+      }
+      name = value;
+    } else {
+      timeoutMs = resolveCloneTimeoutMs({ cliValue: value });
+    }
   }
-  return last ?? resolveCloneTimeoutMs({ envValue: process.env.OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS });
+  return {
+    name,
+    force,
+    timeoutMs: timeoutMs ?? resolveCloneTimeoutMs({ envValue: process.env.OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS }),
+  };
 }
 
 function usage(): string {
@@ -83,9 +94,7 @@ export async function runBabelfishCli(args: string[]): Promise<void> {
     const result = await installPlugin({
       ...options,
       source: target,
-      name: readOptionValue(args, "--name"),
-      force: args.includes("--force"),
-      timeoutMs: readCloneTimeoutMs(args),
+      ...parseInstallOptions(args.slice(3)),
       validate: app === "hermes"
         ? validateHermesPluginDirectory
         : (target) => validateBundlePluginDirectory(app, target),
