@@ -349,21 +349,14 @@ process.exitCode = ${code};
     }
   }, 20_000);
 
-  it.skipIf(process.platform === "win32").each([
-    {
-      label: "single-quoted comparison",
-      command: "if [ '${BABELFISH_TEST_FLAG}' = deny ]; then exit 2; fi; exit 0",
-    },
-    {
-      label: "command substitution",
-      command: "if [ \"$(printf %s '${BABELFISH_TEST_FLAG}')\" = deny ]; then exit 2; fi; exit 0",
-    },
-  ])("blocks and allows the $label guard", async ({ command }) => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hook-guard-"));
+  it.skipIf(process.platform === "win32")("still blocks a single-quoted denying guard", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-single-quote-"));
     const plugin = path.join(rootDir, "codex", "fixture");
-    vi.stubEnv("BABELFISH_TEST_FLAG", "deny");
+    const previous = process.env.BABELFISH_TEST_FLAG;
+    process.env.BABELFISH_TEST_FLAG = "deny";
     try {
       await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      const command = "if [ '${BABELFISH_TEST_FLAG}' = deny ]; then exit 2; fi; exit 0";
       await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
         hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
       }));
@@ -374,10 +367,11 @@ process.exitCode = ${code};
       await expect(invokeBundleHooks(config, "PreToolUse", {})).resolves.toEqual([
         { decision: "block", reason: expect.any(String) },
       ]);
-      vi.stubEnv("BABELFISH_TEST_FLAG", "allow");
+      process.env.BABELFISH_TEST_FLAG = "allow";
       await expect(invokeBundleHooks(config, "PreToolUse", {})).resolves.toEqual([]);
     } finally {
-      vi.unstubAllEnvs();
+      if (previous === undefined) delete process.env.BABELFISH_TEST_FLAG;
+      else process.env.BABELFISH_TEST_FLAG = previous;
       await fs.rm(rootDir, { recursive: true, force: true });
     }
   });
@@ -385,8 +379,9 @@ process.exitCode = ${code};
   it.skipIf(process.platform !== "win32")("preserves cmd parameter-like literals and captures shell-looking values", async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-cmd-literals-"));
     const plugin = path.join(rootDir, "codex", "fixture");
+    const previous = process.env.BABELFISH_TEST_FLAG;
     const value = "literal $(echo marker) & echo injected>marker & apostrophe's";
-    vi.stubEnv("BABELFISH_TEST_FLAG", value);
+    process.env.BABELFISH_TEST_FLAG = value;
     try {
       await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
       await fs.writeFile(path.join(plugin, "capture.cjs"), "require('node:fs').writeFileSync('captured.json', JSON.stringify(process.argv.slice(2))); process.stdin.resume();");
@@ -404,32 +399,21 @@ process.exitCode = ${code};
       await expect(fs.stat(path.join(plugin, "marker"))).rejects.toThrow();
       console.log("Windows shell receipt", JSON.stringify({ parameterLiteral: captured[0], capturedValue: captured[1], markerPresent: false }));
     } finally {
-      vi.unstubAllEnvs();
+      if (previous === undefined) delete process.env.BABELFISH_TEST_FLAG;
+      else process.env.BABELFISH_TEST_FLAG = previous;
       await fs.rm(rootDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
   }, 30_000);
 
-  it.skipIf(process.platform === "win32").each([
-    {
-      label: "comment with an apostrophe", denied: "deny",
-      guard: `# don't skip guard\nif [ '\${BABELFISH_TEST_FLAG}' = deny ]; then exit 2; fi`,
-    },
-    {
-      label: "escaped apostrophe", denied: "den'y",
-      guard: `: \\'; if [ "\${BABELFISH_TEST_FLAG}" = "den'y" ]; then exit 2; fi`,
-    },
-    {
-      label: "here-document with an apostrophe", denied: "deny",
-      guard: `cat <<'EOF' >/dev/null\n'\nEOF\nif [ '\${BABELFISH_TEST_FLAG}' = deny ]; then exit 2; fi`,
-    },
-  ])("blocks and allows the $label guard", async ({ guard, denied }) => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hook-guard-"));
+  it.skipIf(process.platform === "win32")("still blocks a guard after a comment that contains an apostrophe", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-comment-quote-"));
     const plugin = path.join(rootDir, "codex", "fixture");
     const marker = path.join(rootDir, "ran");
-    vi.stubEnv("BABELFISH_TEST_FLAG", denied);
+    const previous = process.env.BABELFISH_TEST_FLAG;
+    process.env.BABELFISH_TEST_FLAG = "deny";
     try {
       await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
-      const command = `${guard}; touch ${JSON.stringify(marker)}; exit 0`;
+      const command = `# don't skip guard\nif [ '\${BABELFISH_TEST_FLAG}' = deny ]; then exit 2; fi; touch ${JSON.stringify(marker)}; exit 0`;
       await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
         hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
       }));
@@ -441,11 +425,99 @@ process.exitCode = ${code};
         { decision: "block", reason: expect.any(String) },
       ]);
       await expect(fs.stat(marker)).rejects.toThrow();
-      vi.stubEnv("BABELFISH_TEST_FLAG", "allow");
+      process.env.BABELFISH_TEST_FLAG = "allow";
       await expect(invokeBundleHooks(config, "PreToolUse", {})).resolves.toEqual([]);
       await expect(fs.stat(marker)).resolves.toBeTruthy();
     } finally {
-      vi.unstubAllEnvs();
+      if (previous === undefined) delete process.env.BABELFISH_TEST_FLAG;
+      else process.env.BABELFISH_TEST_FLAG = previous;
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("still blocks a guard after an unquoted escaped apostrophe", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-escape-quote-"));
+    const plugin = path.join(rootDir, "codex", "fixture");
+    const marker = path.join(rootDir, "ran");
+    const previous = process.env.BABELFISH_TEST_FLAG;
+    process.env.BABELFISH_TEST_FLAG = "den'y";
+    try {
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      const command = `: \\'; if [ "\${BABELFISH_TEST_FLAG}" = "den'y" ]; then exit 2; fi; touch ${JSON.stringify(marker)}; exit 0`;
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
+      }));
+      const config = {
+        rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
+        timeoutMs: fixtureTimeoutMs, env: {},
+      };
+      await expect(invokeBundleHooks(config, "PreToolUse", {})).resolves.toEqual([
+        { decision: "block", reason: expect.any(String) },
+      ]);
+      await expect(fs.stat(marker)).rejects.toThrow();
+      process.env.BABELFISH_TEST_FLAG = "allow";
+      await expect(invokeBundleHooks(config, "PreToolUse", {})).resolves.toEqual([]);
+      await expect(fs.stat(marker)).resolves.toBeTruthy();
+    } finally {
+      if (previous === undefined) delete process.env.BABELFISH_TEST_FLAG;
+      else process.env.BABELFISH_TEST_FLAG = previous;
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("still blocks a guard after a here-document that contains an apostrophe", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-heredoc-quote-"));
+    const plugin = path.join(rootDir, "codex", "fixture");
+    const marker = path.join(rootDir, "ran");
+    const previous = process.env.BABELFISH_TEST_FLAG;
+    process.env.BABELFISH_TEST_FLAG = "deny";
+    try {
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      const command = `cat <<'EOF' >/dev/null\n'\nEOF\nif [ '\${BABELFISH_TEST_FLAG}' = deny ]; then exit 2; fi; touch ${JSON.stringify(marker)}; exit 0`;
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
+      }));
+      const config = {
+        rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
+        timeoutMs: fixtureTimeoutMs, env: {},
+      };
+      await expect(invokeBundleHooks(config, "PreToolUse", {})).resolves.toEqual([
+        { decision: "block", reason: expect.any(String) },
+      ]);
+      await expect(fs.stat(marker)).rejects.toThrow();
+      process.env.BABELFISH_TEST_FLAG = "allow";
+      await expect(invokeBundleHooks(config, "PreToolUse", {})).resolves.toEqual([]);
+      await expect(fs.stat(marker)).resolves.toBeTruthy();
+    } finally {
+      if (previous === undefined) delete process.env.BABELFISH_TEST_FLAG;
+      else process.env.BABELFISH_TEST_FLAG = previous;
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("still blocks a single-quoted guard inside a command substitution", async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-nested-quote-"));
+    const plugin = path.join(rootDir, "codex", "fixture");
+    const previous = process.env.BABELFISH_TEST_FLAG;
+    process.env.BABELFISH_TEST_FLAG = "deny";
+    try {
+      await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+      const command = "if [ \"$(printf %s '${BABELFISH_TEST_FLAG}')\" = deny ]; then exit 2; fi; exit 0";
+      await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({
+        hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] },
+      }));
+      const config = {
+        rootDir, installDir: path.join(rootDir, "hermes"), python: "python3",
+        timeoutMs: fixtureTimeoutMs, env: {},
+      };
+      await expect(invokeBundleHooks(config, "PreToolUse", {})).resolves.toEqual([
+        { decision: "block", reason: expect.any(String) },
+      ]);
+      process.env.BABELFISH_TEST_FLAG = "allow";
+      await expect(invokeBundleHooks(config, "PreToolUse", {})).resolves.toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.BABELFISH_TEST_FLAG;
+      else process.env.BABELFISH_TEST_FLAG = previous;
       await fs.rm(rootDir, { recursive: true, force: true });
     }
   });

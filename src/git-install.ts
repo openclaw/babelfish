@@ -129,7 +129,13 @@ export async function validateHermesPluginDirectory(target: string): Promise<voi
   }
 }
 
-async function cleanupStaging(stagingRoot: string): Promise<void> {
+async function createStagingRoot(installDir: string, pluginName: string): Promise<string> {
+  const root = path.join(installDir, ".babelfish-staging", `${pluginName}.${process.pid}.${Date.now()}`);
+  await fs.mkdir(root, { recursive: true });
+  return root;
+}
+
+async function cleanStagingRoot(stagingRoot: string): Promise<void> {
   await fs.rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
   await fs.rmdir(path.dirname(stagingRoot)).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") {
@@ -158,12 +164,9 @@ export async function installPlugin({
   if (replacing && !force) {
     throw new Error(`Plugin '${pluginName}' already exists. Pass force=true to reinstall.`);
   }
-  const nonce = `${process.pid}.${Date.now()}`;
-  const stagingRoot = path.join(installDir, ".babelfish-staging", `${pluginName}.${nonce}`);
+  const stagingRoot = await createStagingRoot(installDir, pluginName);
   const staged = path.join(stagingRoot, "new");
   const backup = path.join(stagingRoot, "old");
-  await fs.mkdir(installDir, { recursive: true });
-  await fs.mkdir(stagingRoot, { recursive: true });
 
   try {
     await cloneRepository(source, staged, timeoutMs);
@@ -193,7 +196,7 @@ export async function installPlugin({
     await fs.rm(staged, { recursive: true, force: true });
     throw error;
   } finally {
-    await cleanupStaging(stagingRoot);
+    await cleanStagingRoot(stagingRoot);
   }
 
   return { name: pluginName, path: target };
@@ -209,13 +212,8 @@ export async function uninstallPlugin({
   if (!(await pathExists(target))) {
     throw new Error(`Plugin '${pluginName}' is not installed.`);
   }
-  const stagingRoot = path.join(
-    installDir,
-    ".babelfish-staging",
-    `${pluginName}.${process.pid}.${Date.now()}`,
-  );
+  const stagingRoot = await createStagingRoot(installDir, pluginName);
   const backup = path.join(stagingRoot, "old");
-  await fs.mkdir(stagingRoot, { recursive: true });
   await fs.rename(target, backup);
   try {
     await afterChange?.();
@@ -224,7 +222,7 @@ export async function uninstallPlugin({
     await fs.rename(backup, target);
     throw error;
   } finally {
-    await cleanupStaging(stagingRoot);
+    await cleanStagingRoot(stagingRoot);
   }
   return { name: pluginName, path: target };
 }
