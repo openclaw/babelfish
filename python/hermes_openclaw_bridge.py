@@ -485,31 +485,19 @@ def _invoke_event_callback(handler: Callable[..., Any], kwargs: dict[str, Any]) 
     if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params):
         return _run_handler(handler, **kwargs)
 
+    if len(params) == 1:
+        param = params[0]
+        if param.default is inspect.Parameter.empty and (
+            param.kind == inspect.Parameter.POSITIONAL_ONLY
+            or (param.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and param.name not in kwargs)
+        ):
+            return _run_handler(handler, kwargs)
+
     keyword_names = {
-        param.name
-        for param in params
-        if param.kind
-        in {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        }
+        param.name for param in params
+        if param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
     }
-    filtered = {key: value for key, value in kwargs.items() if key in keyword_names}
-    missing_required = [
-        param
-        for param in params
-        if param.default is inspect.Parameter.empty
-        and param.kind
-        in {
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        }
-        and param.name not in filtered
-    ]
-    if len(params) == 1 and len(missing_required) == 1:
-        return _invoke(handler, kwargs)
-    return _run_handler(handler, **filtered)
+    return _run_handler(handler, **{key: value for key, value in kwargs.items() if key in keyword_names})
 
 
 Registration = TypeVar("Registration", ToolRecord, CommandRecord, CliCommandRecord, SkillRecord)
