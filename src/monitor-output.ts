@@ -17,20 +17,24 @@ export function createMonitorOutputReader(
 ): { write(chunk: Buffer): void; end(): void } {
   const decoder = new StringDecoder("utf8");
   let pendingLine = "";
+  let pendingBytes = 0;
   let stopped = false;
   const takeText = (text: string) => {
     const parts = text.split(/\r\n|\n|\r/);
     for (let index = 0; index < parts.length; index += 1) {
-      pendingLine += parts[index];
-      if (Buffer.byteLength(pendingLine) > MAX_MONITOR_OUTPUT_BYTES) {
+      const part = parts[index];
+      pendingBytes += Buffer.byteLength(part);
+      if (pendingBytes > MAX_MONITOR_OUTPUT_BYTES) {
         stopped = true;
         pendingLine = "";
         onOverflow();
         return;
       }
+      pendingLine += part;
       if (index < parts.length - 1) {
         onLine(pendingLine);
         pendingLine = "";
+        pendingBytes = 0;
       }
     }
   };

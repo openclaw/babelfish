@@ -6,6 +6,8 @@
 
 - Reuse Hermes plugin discovery when generating tools and skills during an install or uninstall.
 
+- Count each monitor output fragment once when enforcing the 1 MiB line limit.
+
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
 - Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log.
