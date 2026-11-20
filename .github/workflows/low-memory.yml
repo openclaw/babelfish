@@ -2,6 +2,14 @@ name: Low-memory
 
 on:
   pull_request:
+    paths-ignore:
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/pull_request_template.md"
+      - "AGENTS.md"
+      - "CODE_OF_CONDUCT.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "SUPPORT.md"
   workflow_dispatch:
 
 concurrency:
