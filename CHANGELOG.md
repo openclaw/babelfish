@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Load the MCP SDK when a client or server starts, reducing startup time for everyday CLI commands and plugin registration.
+
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.
