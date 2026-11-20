@@ -379,6 +379,17 @@ describe("native OpenClaw hook entry", () => {
       ]);
       expect(cliProgram.command).toHaveBeenCalledWith("simplecli");
       expect(cliApi.registerCli).toHaveBeenCalledTimes(2);
+      for (const [index, name, description, hasSubcommands] of [
+        [1, "babelfish", "Manage imported app plugins.", true],
+        [2, "simplecli", "Simple CLI command", false],
+      ] as const) {
+        expect(cliApi.registerCli).toHaveBeenNthCalledWith(index, expect.any(Function), {
+          commands: [name], descriptors: [{ name, description, hasSubcommands }],
+        });
+      }
+      const imported = cliProgram.command.mock.results[0]!.value;
+      expect(imported.allowUnknownOption).toHaveBeenCalledWith(true);
+      expect(imported.argument).toHaveBeenCalledWith("[args...]", "Arguments passed to the imported CLI command.");
       const log = vi.spyOn(console, "log").mockImplementation(() => {});
       const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
       try {

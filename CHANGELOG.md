@@ -4,7 +4,7 @@
 
 - Check the package on Node.js 26 in Linux CI and honor the selected npm cache during offline consumer validation.
 
-- Report Hermes command handler failures as MCP tool errors and reject unknown tool names with the JSON-RPC invalid-params code.
+- Reuse Hermes plugin discovery when generating tools and skills during an install or uninstall.
 
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
@@ -36,6 +36,8 @@
 - Run macOS CI on the Apple Silicon Xcode 27 image while retaining Node.js 22.19 support.
 
 - Pass Hermes tool-result hooks the serialized result and session identifier, honor empty replacements, and warn when a plugin requests the terminal-only output hook.
+
+- Report Hermes command handler failures as MCP tool errors and reject unknown tool names with the JSON-RPC invalid-params code.
 
 ## 0.1.2 — 2026-10-17
 

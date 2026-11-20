@@ -50,6 +50,7 @@ type OpenClawCliCommand = {
   allowUnknownOption(value?: boolean): OpenClawCliCommand;
   action(handler: (args?: string[]) => unknown): OpenClawCliCommand;
 };
+type CliDescriptor = { name: string; description: string; hasSubcommands: boolean };
 type OpenClawCliProgram = {
   command(name: string): OpenClawCliCommand;
 };
@@ -99,7 +100,7 @@ type OpenClawApi = {
     registrar: (ctx: { program: OpenClawCliProgram }) => void,
     options: {
       commands: string[];
-      descriptors: Array<{ name: string; description: string; hasSubcommands: boolean }>;
+      descriptors: CliDescriptor[];
     },
   ): void;
 };
@@ -119,10 +120,10 @@ const UNSUPPORTED_WARNING_MIDDLEWARE = new Set([
   "tool_execution",
 ]);
 
+type SessionStart = { pending?: Promise<void>; context?: string[] };
+
 const config = resolveConfig();
-const sessionStartContext = new Map<string, string[]>();
-const sessionStartPending = new Map<string, Promise<void>>();
-const sessionStartOwners = new Map<string, symbol>();
+const sessionStarts = new Map<string, SessionStart>();
 const sessionStartSources = new Map<string, string>();
 const promptContextByRun = new Map<string, string[]>();
 const outputStyleBySession = new Map<string, GeneratedOutputStyleEntry>();
@@ -496,48 +497,44 @@ export function registerOutputStyles(api: OpenClawApi, generated?: GeneratedOutp
   }
 }
 
+function registerCliCommand(
+  api: OpenClawApi,
+  descriptor: CliDescriptor,
+  argsHint: string,
+  action: (args: string[]) => Promise<void>,
+): void {
+  api.registerCli(
+    ({ program }) => {
+      program.command(descriptor.name)
+        .description(descriptor.description)
+        .argument("[args...]", argsHint)
+        .allowUnknownOption(true)
+        .action((args = []) => action(args));
+    },
+    { commands: [descriptor.name], descriptors: [descriptor] },
+  );
+}
+
 export function registerHermesCliCommands(
   api: OpenClawApi,
   generated?: GeneratedCommandEntry[],
 ): void {
   const entries = generated ?? readGeneratedNativeToolRegistry().cliCommands;
-  if (entries.length === 0) {
-    return;
-  }
   for (const entry of entries) {
-    api.registerCli(
-      ({ program }) => {
-        program
-          .command(entry.name)
-          .description(entry.description)
-          .argument("[args...]", entry.argsHint || "Arguments passed to the imported CLI command.")
-          .allowUnknownOption(true)
-          .action(async (args = []) => {
-            const result = await callHermesCliCommand(config, {
-              plugin: entry.plugin,
-              command: entry.originalName,
-              args,
-              context: { workspace: process.cwd(), env: {} },
-            });
-            if (result.stdout) {
-              process.stdout.write(result.stdout);
-            }
-            if (result.stderr) {
-              process.stderr.write(result.stderr);
-            }
-            if (result.result !== null && result.result !== undefined) {
-              const output = stringifyResult(result.result);
-              console.log(output);
-            }
-          });
-      },
-      {
-        commands: [entry.name],
-        descriptors: [{
-        name: entry.name,
-        description: entry.description,
-        hasSubcommands: false,
-        }],
+    registerCliCommand(
+      api,
+      { name: entry.name, description: entry.description, hasSubcommands: false },
+      entry.argsHint || "Arguments passed to the imported CLI command.",
+      async (args) => {
+        const result = await callHermesCliCommand(config, {
+          plugin: entry.plugin,
+          command: entry.originalName,
+          args,
+          context: { workspace: process.cwd(), env: {} },
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        if (result.result !== null && result.result !== undefined) console.log(stringifyResult(result.result));
       },
     );
   }
@@ -585,18 +582,18 @@ function registerRunHooks(api: OpenClawApi): void {
     const key = sessionKey(event, ctx);
     if (key) {
       for (;;) {
-        const pendingStart = sessionStartPending.get(key);
-        if (!pendingStart) break;
+        const start = sessionStarts.get(key);
+        if (!start?.pending) break;
+        const pendingStart = start.pending;
         try {
           await pendingStart;
         } catch (error) {
-          if (sessionStartPending.get(key) === pendingStart) {
+          if (sessionStarts.get(key)?.pending === pendingStart) {
             const detail = error instanceof Error ? error.message : String(error);
             api.logger?.warn(`Babelfish session start failed: ${detail}`);
           }
         } finally {
-          // Keep concurrent prepares waiting, and never remove a newer start.
-          if (sessionStartPending.get(key) === pendingStart) sessionStartPending.delete(key);
+          start.pending = undefined;
         }
       }
     }
@@ -606,8 +603,11 @@ function registerRunHooks(api: OpenClawApi): void {
       promptContextByRun.delete(promptRunKey);
     }
     if (key) {
-      contextParts.unshift(...(sessionStartContext.get(key) ?? []));
-      sessionStartContext.delete(key);
+      const start = sessionStarts.get(key);
+      if (start?.context) {
+        contextParts.unshift(...start.context);
+        start.context = undefined;
+      }
       const style = outputStyleBySession.get(key);
       if (style) {
         contextParts.push(style.keepCodingInstructions
@@ -662,36 +662,24 @@ function registerRunHooks(api: OpenClawApi): void {
 }
 
 export function registerBabelfishCli(api: OpenClawApi): void {
-  api.registerCli(
-    ({ program }) => {
-      program
-        .command("babelfish")
-        .description("Manage imported app plugins.")
-        .argument("[args...]", "Babelfish command and arguments.")
-        .allowUnknownOption(true)
-        .action(async (args = []) => runBabelfishCli(args));
-    },
-    {
-      commands: ["babelfish"],
-      descriptors: [
-        { name: "babelfish", description: "Manage imported app plugins.", hasSubcommands: true },
-      ],
-    },
+  registerCliCommand(
+    api,
+    { name: "babelfish", description: "Manage imported app plugins.", hasSubcommands: true },
+    "Babelfish command and arguments.",
+    runBabelfishCli,
   );
 }
 
 function registerSessionHooks(api: OpenClawApi): void {
   api.on("session_start", async (event, ctx) => {
     const key = sessionKey(event, ctx);
-    const owner = Symbol();
-    if (key) {
-      sessionStartOwners.set(key, owner);
-      sessionStartContext.delete(key);
-    }
+    const start: SessionStart = {};
+    // The record also identifies which start owns this session after an await.
+    if (key) sessionStarts.set(key, start);
     // Enqueue Hermes start synchronously, before a concurrent turn callback.
-    const pending = (async () => {
+    start.pending = (async () => {
       await invokeHook("on_session_start", event, ctx);
-      if (key && sessionStartOwners.get(key) !== owner) return;
+      if (key && sessionStarts.get(key) !== start) return;
       const rawEvent = record(event);
       const sessionId = typeof rawEvent.sessionId === "string" ? rawEvent.sessionId : undefined;
       const transitionSource = sessionId ? sessionStartSources.get(sessionId) : undefined;
@@ -702,14 +690,9 @@ function registerSessionHooks(api: OpenClawApi): void {
         sessionStartSources.delete(sessionId);
       }
       const imported = await bundleHooks("SessionStart", event, ctx, source);
-      if (key && sessionStartOwners.get(key) !== owner) return;
-      const additional = imported
-        .map(hookAdditionalContext)
-        .filter((value): value is string => Boolean(value));
-      if (key && additional.length > 0) {
-        sessionStartContext.set(key, additional);
-      }
+      if (key && sessionStarts.get(key) !== start) return;
       if (key) {
+        start.context = imported.map(hookAdditionalContext).filter((value): value is string => Boolean(value));
         await startMonitors(
           key,
           context(ctx).workspace ?? process.cwd(),
@@ -717,15 +700,12 @@ function registerSessionHooks(api: OpenClawApi): void {
         );
       }
     })();
-    if (key) {
-      sessionStartPending.set(key, pending);
-    }
-    await pending;
+    await start.pending;
   });
   api.on("session_end", async (event, ctx) => {
     const runtimeContext = context(ctx);
     const key = sessionKey(event, ctx);
-    const owner = key ? sessionStartOwners.get(key) : undefined;
+    const owner = key ? sessionStarts.get(key) : undefined;
     try {
       await invokeHermesHook(config, {
         hook: "on_session_finalize",
@@ -746,11 +726,9 @@ function registerSessionHooks(api: OpenClawApi): void {
         }
         await bundleHooks("SessionEnd", event, ctx, typeof reason === "string" ? reason : "");
       } finally {
-        if (!key || sessionStartOwners.get(key) === owner) {
+        if (!key || sessionStarts.get(key) === owner) {
           if (key) {
-            sessionStartOwners.delete(key);
-            sessionStartContext.delete(key);
-            sessionStartPending.delete(key);
+            sessionStarts.delete(key);
             outputStyleBySession.delete(key);
             stopMonitors(key);
           }
@@ -762,7 +740,7 @@ function registerSessionHooks(api: OpenClawApi): void {
   api.on("before_reset", async (event, ctx) => {
     const runtimeContext = context(ctx);
     const key = sessionKey(event, ctx);
-    const owner = key ? sessionStartOwners.get(key) : undefined;
+    const owner = key ? sessionStarts.get(key) : undefined;
     try {
       await invokeHermesHook(config, {
         hook: "on_session_reset",
@@ -770,7 +748,7 @@ function registerSessionHooks(api: OpenClawApi): void {
         context: runtimeContext,
       });
     } finally {
-      if (!key || sessionStartOwners.get(key) === owner) {
+      if (!key || sessionStarts.get(key) === owner) {
         releaseHermesBridge(config, runtimeContext);
       }
     }
