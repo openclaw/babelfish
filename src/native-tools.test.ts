@@ -33,87 +33,60 @@ async function writeCommandFixture(root: string, name: string): Promise<void> {
   );
 }
 
-describe("native generated tools", () => {
-  it("generates live MCP resource and prompt tools", async () => {
-    const stateRoot = await tempDir("babelfish-mcp-state-");
-    const plugin = path.join(stateRoot, "codex", "fixture");
-    const root = await tempDir("babelfish-package-");
-    await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
-    await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({ name: "fixture" }));
-    await fs.writeFile(path.join(plugin, ".mcp.json"), JSON.stringify({ mcpServers: { data: { command: "node", args: ["server.mjs"] } } }));
-    await fs.writeFile(path.join(plugin, "server.mjs"), `
+async function generateMcpFixture(servers: ("data" | "tools" | "resources")[]) {
+  const stateRoot = await tempDir("babelfish-mcp-state-");
+  const plugin = path.join(stateRoot, "codex", "fixture");
+  const root = await tempDir("babelfish-package-");
+  const config = { installDir: path.join(stateRoot, "hermes"), rootDir: stateRoot, python: "python3", timeoutMs: fixtureTimeoutMs, env: {} };
+  await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
+  await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({ name: "fixture" }));
+  const mcpServers = Object.fromEntries(servers.map((name) => [name, { command: "node", args: ["server.mjs", name] }]));
+  await fs.writeFile(path.join(plugin, ".mcp.json"), JSON.stringify({ mcpServers }));
+  await fs.writeFile(path.join(plugin, "server.mjs"), `
 import { Server } from ${JSON.stringify(sdkUrl("server/index.js"))};
 import { StdioServerTransport } from ${JSON.stringify(sdkUrl("server/stdio.js"))};
-import { ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema } from ${JSON.stringify(sdkUrl("types.js"))};
-const server = new Server({name:"fixture",version:"1"},{capabilities:{tools:{},resources:{},prompts:{}}});
-server.setRequestHandler(ListToolsRequestSchema, async () => ({tools:[]}));
-server.setRequestHandler(ListResourcesRequestSchema, async () => ({resources:[{uri:"memo://one",name:"one"}]}));
-server.setRequestHandler(ReadResourceRequestSchema, async () => ({contents:[{uri:"memo://one",text:"resource body"}]}));
-server.setRequestHandler(ListPromptsRequestSchema, async () => ({prompts:[{name:"brief",description:"Brief prompt"}]}));
-server.setRequestHandler(GetPromptRequestSchema, async () => ({messages:[{role:"user",content:{type:"text",text:"prompt body"}}]}));
+import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, ListPromptsRequestSchema, GetPromptRequestSchema } from ${JSON.stringify(sdkUrl("types.js"))};
+const mode = process.argv[2];
+const capabilities = mode === "data" ? { tools: {}, resources: {}, prompts: {} } : { [mode]: {} };
+const server = new Server({name:mode,version:"1"},{capabilities});
+if (capabilities.tools) {
+  const tools = mode === "tools" ? [{name:"echo",inputSchema:{type:"object"}}] : [];
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({tools}));
+  server.setRequestHandler(CallToolRequestSchema, async ({params}) => ({content:[{type:"text",text:params.arguments.text}]}));
+}
+if (capabilities.resources) {
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({resources:[{uri:"memo://one",name:"one"}]}));
+  server.setRequestHandler(ReadResourceRequestSchema, async ({params}) => ({contents:[{uri:params.uri,text:"resource body"}]}));
+}
+if (capabilities.prompts) {
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({prompts:[{name:"brief",description:"Brief prompt"}]}));
+  server.setRequestHandler(GetPromptRequestSchema, async ({params}) => ({messages:[{role:"user",content:{type:"text",text:params.name + ": " + params.arguments.topic}}]}));
+}
 await server.connect(new StdioServerTransport());
 `);
-    await fs.mkdir(path.join(root, "skills"));
-    await fs.writeFile(path.join(root, "openclaw.plugin.json"), JSON.stringify({ id: "babelfish", contracts: {} }));
-    await regenerateNativeTools(
-      { installDir: path.join(stateRoot, "hermes"), rootDir: stateRoot, python: "python3", timeoutMs: fixtureTimeoutMs, env: {} },
-      { root },
-    );
-    const registry = JSON.parse(await fs.readFile(path.join(root, "babelfish.generated.json"), "utf8"));
-    const tools = createNativeTools(
-      { installDir: path.join(stateRoot, "hermes"), rootDir: stateRoot, python: "python3", timeoutMs: fixtureTimeoutMs, env: {} },
-      registry.tools,
-      {},
-    );
+  await fs.mkdir(path.join(root, "skills"));
+  await fs.writeFile(path.join(root, "openclaw.plugin.json"), JSON.stringify({ id: "babelfish", contracts: {} }));
+  await regenerateNativeTools(config, { root });
+  const registry = JSON.parse(await fs.readFile(path.join(root, "babelfish.generated.json"), "utf8"));
+  return { config, registry };
+}
+
+describe("native generated tools", () => {
+  it("generates live MCP resource and prompt tools", async () => {
+    const { config, registry } = await generateMcpFixture(["data"]);
+    const tools = createNativeTools(config, registry.tools, {});
     await expect(tools.find((tool) => tool.name.endsWith("resources_list"))?.execute("1", {}))
       .resolves.toMatchObject({ details: { resources: [{ uri: "memo://one" }] } });
-    await expect(tools.find((tool) => tool.name.endsWith("resource_read"))?.execute("2", { uri: "memo://one" }))
-      .resolves.toMatchObject({ details: { contents: [{ text: "resource body" }] } });
+    await expect(tools.find((tool) => tool.name.endsWith("resource_read"))?.execute("2", { uri: "memo://two" }))
+      .resolves.toMatchObject({ details: { contents: [{ uri: "memo://two", text: "resource body" }] } });
     await expect(tools.find((tool) => tool.name.endsWith("prompts_list"))?.execute("3", {}))
       .resolves.toMatchObject({ details: { prompts: [{ name: "brief" }] } });
-    await expect(tools.find((tool) => tool.name.endsWith("prompt_get"))?.execute("4", { name: "brief" }))
+    await expect(tools.find((tool) => tool.name.endsWith("prompt_get"))?.execute("4", { name: "brief", arguments: { topic: "release" } }))
       .resolves.toMatchObject({ details: { messages: [{ role: "user" }] } });
   }, 30_000);
 
   it("generates only operations advertised by each MCP server", async () => {
-    const stateRoot = await tempDir("babelfish-mcp-state-");
-    const plugin = path.join(stateRoot, "codex", "fixture");
-    const root = await tempDir("babelfish-package-");
-    await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
-    await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({ name: "fixture" }));
-    await fs.writeFile(
-      path.join(plugin, ".mcp.json"),
-      JSON.stringify({
-        mcpServers: {
-          tools: { command: "node", args: ["server.mjs", "tools"] },
-          resources: { command: "node", args: ["server.mjs", "resources"] },
-        },
-      }),
-    );
-    await fs.writeFile(path.join(plugin, "server.mjs"), `
-import { Server } from ${JSON.stringify(sdkUrl("server/index.js"))};
-import { StdioServerTransport } from ${JSON.stringify(sdkUrl("server/stdio.js"))};
-import { ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema } from ${JSON.stringify(sdkUrl("types.js"))};
-const mode = process.argv[2];
-const capabilities = mode === "tools" ? {tools:{}} : {resources:{}};
-const server = new Server({name:mode,version:"1"},{capabilities});
-if (mode === "tools") {
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({tools:[{name:"echo",inputSchema:{type:"object"}}]}));
-} else {
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({resources:[{uri:"memo://one",name:"one"}]}));
-  server.setRequestHandler(ReadResourceRequestSchema, async () => ({contents:[{uri:"memo://one",text:"resource body"}]}));
-}
-await server.connect(new StdioServerTransport());
-`);
-    await fs.mkdir(path.join(root, "skills"));
-    await fs.writeFile(path.join(root, "openclaw.plugin.json"), JSON.stringify({ id: "babelfish", contracts: {} }));
-
-    await regenerateNativeTools(
-      { installDir: path.join(stateRoot, "hermes"), rootDir: stateRoot, python: "python3", timeoutMs: fixtureTimeoutMs, env: {} },
-      { root },
-    );
-
-    const registry = JSON.parse(await fs.readFile(path.join(root, "babelfish.generated.json"), "utf8"));
+    const { config, registry } = await generateMcpFixture(["tools", "resources"]);
     expect(
       registry.tools
         .map((tool: { server?: string; originalName: string }) => `${tool.server}:${tool.originalName}`)
@@ -123,6 +96,10 @@ await server.connect(new StdioServerTransport());
       "resources:resources/read",
       "tools:echo",
     ]);
+    const echo = createNativeTools(config, registry.tools, {}).find((tool) => tool.name === "echo");
+    await expect(echo?.execute("1", { text: "hello" })).resolves.toMatchObject({
+      content: [{ type: "text", text: "hello" }],
+    });
   }, 30_000);
 
   it("maps MCP result blocks to OpenClaw text and image content", () => {
