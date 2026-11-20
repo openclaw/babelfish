@@ -40,6 +40,11 @@ async function writeFiles(root, files) {
 async function createGitSource(name, files) {
   const root = path.join(sourceRoot, name);
   await writeFiles(root, files);
+  await commitFixture(root);
+  return root;
+}
+
+async function commitFixture(root) {
   await run("git", ["init", "--quiet"], { cwd: root });
   await run("git", ["add", "."], { cwd: root });
   await run(
@@ -56,7 +61,6 @@ async function createGitSource(name, files) {
     ],
     { cwd: root },
   );
-  return root;
 }
 
 async function runCli(args) {
@@ -82,22 +86,7 @@ async function prepareSources() {
   await fs.cp(path.join(packageRoot, "test", "fixtures", "simple-hermes-plugin"), hermes, {
     recursive: true,
   });
-  await run("git", ["init", "--quiet"], { cwd: hermes });
-  await run("git", ["add", "."], { cwd: hermes });
-  await run(
-    "git",
-    [
-      "-c",
-      "user.name=Babelfish Low Memory",
-      "-c",
-      "user.email=low-memory@example.invalid",
-      "commit",
-      "--quiet",
-      "-m",
-      "fixture",
-    ],
-    { cwd: hermes },
-  );
+  await commitFixture(hermes);
 
   const claude = await createGitSource("claude", {
     ".claude-plugin/plugin.json": JSON.stringify({
