@@ -1,16 +1,19 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { hookTestApi } from "../test/hook-api.js";
+import { copyFixture } from "../test/hermes-fixtures.js";
 import { tempDir } from "../test/temp-dir.js";
 import { MAX_MONITOR_OUTPUT_BYTES } from "./monitor-output.js";
 
-async function removeTemp(root: string): Promise<void> {
-  await fs.rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+function quote(value: string): string {
+  return process.platform === "win32"
+    ? `"${value.replaceAll('"', '""')}"`
+    : JSON.stringify(value);
 }
 
-async function copyFixture(target: string): Promise<void> {
-  const fixture = path.join(process.cwd(), "test/fixtures/simple-hermes-plugin");
-  await fs.cp(fixture, path.join(target, "simple"), { recursive: true });
+async function removeTemp(root: string): Promise<void> {
+  await fs.rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 }
 
 describe("native OpenClaw hook entry", () => {
@@ -30,12 +33,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      entry.register(hookTestApi(hooks));
       await expect(hooks.get("before_tool_call")!({ toolName: "fixture", params: {} }, { sessionId: "guard" }))
         .resolves.toEqual({ block: true, blockReason: "imported guard" });
     } finally {
@@ -59,12 +57,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      entry.register(hookTestApi(hooks));
       const first = { sessionId: "first" };
       const second = { sessionId: "second" };
       await hooks.get("session_start")!({}, first);
@@ -100,14 +93,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined,
-        registerCommand: () => undefined,
-        registerCli: () => undefined,
-        registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      entry.register(hookTestApi(hooks));
       const result = await hooks.get(handlerName)?.({ toolName: "fixture" }, {});
       expect(result).toMatchObject(expected);
       expect(JSON.stringify(result)).toContain("command expansion failed");
@@ -430,14 +416,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       hooks = new Map();
-      entry.register({
-        on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => { hooks.set(name, handler); },
-        registerTool: () => undefined,
-        registerCommand: () => undefined,
-        registerCli: () => undefined,
-        registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      entry.register(hookTestApi(hooks));
       await hooks.get("session_start")?.(
         { sessionId: "shell-monitor" },
         { sessionId: "shell-monitor", workspaceDir: workspace },
@@ -477,9 +456,6 @@ describe("native OpenClaw hook entry", () => {
         out.write(Buffer.concat([accent.subarray(1), Buffer.from("\\n")]));
         out.write(Buffer.from("final"));
       `);
-      const quote = (value: string) => process.platform === "win32"
-        ? `"${value.replaceAll('"', '""')}"`
-        : JSON.stringify(value);
       const command = process.platform === "win32"
         ? `node "%CLAUDE_PLUGIN_ROOT%\\lines.cjs" ${quote(pidPath)}`
         : `${quote(process.execPath)} ${quote(scriptPath)} ${quote(pidPath)}`;
@@ -490,14 +466,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       hooks = new Map();
-      entry.register({
-        on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => { hooks.set(name, handler); },
-        registerTool: () => undefined,
-        registerCommand: () => undefined,
-        registerCli: () => undefined,
-        registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      entry.register(hookTestApi(hooks));
       await hooks.get("session_start")?.(
         { sessionId: "line-monitor" },
         { sessionId: "line-monitor", workspaceDir: root },
@@ -546,7 +515,6 @@ describe("native OpenClaw hook entry", () => {
           if (fs.existsSync(process.argv[3])) { clearInterval(timer); emit(2); setInterval(() => {}, 1000); }
         }, 10);
       `);
-      const quote = (value: string) => process.platform === "win32" ? `"${value.replaceAll('"', '""')}"` : JSON.stringify(value);
       const command = process.platform === "win32"
         ? `node "%CLAUDE_PLUGIN_ROOT%\\turns.cjs" ${quote(pidPath)} ${quote(triggerPath)}`
         : `${quote(process.execPath)} ${quote(path.join(plugin, "turns.cjs"))} ${quote(pidPath)} ${quote(triggerPath)}`;
@@ -554,12 +522,7 @@ describe("native OpenClaw hook entry", () => {
       await fs.writeFile(path.join(plugin, "monitors", "monitors.json"), JSON.stringify([{ name: "status", description: "Status", command }]));
       vi.resetModules();
       const entry = (await import("./index.js")).default;
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn },
-      });
+      entry.register(hookTestApi(hooks, warn));
       const ctx = { sessionId: "turn-monitor", workspaceDir: root };
       await hooks.get("session_start")?.({}, ctx);
       for (let turn = 1; turn <= 2; turn += 1) {
@@ -601,9 +564,6 @@ describe("native OpenClaw hook entry", () => {
         ]));
         setInterval(() => {}, 1000);
       `);
-      const quote = (value: string) => process.platform === "win32"
-        ? `"${value.replaceAll('"', '""')}"`
-        : JSON.stringify(value);
       const command = process.platform === "win32"
         ? `node "%CLAUDE_PLUGIN_ROOT%\\prefix.cjs" ${quote(pidPath)}`
         : `${quote(process.execPath)} ${quote(scriptPath)} ${quote(pidPath)}`;
@@ -614,14 +574,7 @@ describe("native OpenClaw hook entry", () => {
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       hooks = new Map();
-      entry.register({
-        on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => { hooks.set(name, handler); },
-        registerTool: () => undefined,
-        registerCommand: () => undefined,
-        registerCli: () => undefined,
-        registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn },
-      });
+      entry.register(hookTestApi(hooks, warn));
       await hooks.get("session_start")?.(
         { sessionId: "prefix-monitor" },
         { sessionId: "prefix-monitor", workspaceDir: root },
@@ -660,18 +613,21 @@ describe("Stop hook finalization", () => {
     const pluginRoot = path.join(bundleRoot, "codex", "stop-hooks");
     await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
     const decisions = Array.isArray(decision) ? decision : [decision];
-    for (const [index, result] of decisions.entries()) {
-      await fs.writeFile(
-        path.join(pluginRoot, `hook-${index}.mjs`),
-        `process.stdin.resume(); process.stdin.on("end", () => { console.log(${JSON.stringify(JSON.stringify(result))}); process.exitCode = ${options.exitCode ?? 0}; });`,
-      );
-    }
+    await fs.writeFile(path.join(pluginRoot, "decisions.json"), JSON.stringify(decisions));
+    await fs.writeFile(path.join(pluginRoot, "hook.mjs"), `
+      import decisions from "./decisions.json" with { type: "json" };
+      process.stdin.resume();
+      process.stdin.on("end", () => {
+        console.log(JSON.stringify(decisions[process.argv[2]]));
+        process.exitCode = Number(process.argv[3]);
+      });
+    `);
     await fs.writeFile(
       path.join(pluginRoot, ".codex-plugin", "plugin.json"),
       JSON.stringify({
         hooks: { [options.hookEvent ?? "Stop"]: [{ hooks: decisions.map((_, index) => ({
           type: "command",
-          command: [process.execPath, `hook-${index}.mjs`],
+          command: [process.execPath, "hook.mjs", String(index), String(options.exitCode ?? 0)],
         })) }] },
       }),
     );
@@ -681,16 +637,7 @@ describe("Stop hook finalization", () => {
       vi.resetModules();
       const module = await import("./index.js");
       const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
-      module.default.register({
-        on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => {
-          hooks.set(name, handler);
-        },
-        registerTool: () => undefined,
-        registerCommand: () => undefined,
-        registerCli: () => undefined,
-        registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      module.default.register(hookTestApi(hooks));
       const handler = options.hookEvent === "PreToolUse" ? "before_tool_call"
         : options.hookEvent === "UserPromptSubmit" ? "before_agent_run"
         : "before_agent_finalize";
@@ -710,10 +657,11 @@ describe("Stop hook finalization", () => {
   });
 
   it("revises when a Stop hook sets decision block", async () => {
-    await expect(finalize({ decision: "block", reason: "tests failed" })).resolves.toEqual({
+    const reason = 'tests failed in "stop hook"\nsee details';
+    await expect(finalize({ decision: "block", reason })).resolves.toEqual({
       action: "revise",
-      reason: "tests failed",
-      retry: { instruction: "tests failed" },
+      reason,
+      retry: { instruction: reason },
     });
   });
 

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { hookTestApi } from "../test/hook-api.js";
 
 const failureSources = {
   import: "raise RuntimeError('import failed')\n",
@@ -38,12 +39,7 @@ describe("Hermes decision-provider availability", () => {
         vi.resetModules();
         const entry = (await import("./index.js")).default;
         const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
-        entry.register({
-          logger: { warn: () => undefined },
-          on: (name, handler) => { hooks.set(name, handler); },
-          registerTool: () => undefined, registerCommand: () => undefined,
-          registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        });
+        entry.register(hookTestApi(hooks));
         const session = { sessionId: `session-${kind}` };
         const { releaseHermesBridge } = await import("./hermes-python.js");
         const { resolveConfig } = await import("./config.js");
