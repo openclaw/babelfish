@@ -59,6 +59,7 @@ function tarball(overrides: Record<string, unknown> = {}, extra?: { name: string
 }
 
 describe("verified release tag signer", () => {
+  const windowsTimeout = process.platform === "win32" ? 30_000 : undefined;
   let root: string;
   let source: string;
   let keyDir: string;
@@ -82,20 +83,20 @@ describe("verified release tag signer", () => {
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "babelfish-release-signer-"));
     const config = path.join(root, "gitconfig");
-    fs.writeFileSync(config, "");
+    fs.writeFileSync(config, [
+      "[user]", "name = Release fixture", "email = release@example.invalid",
+      "[gpg]", "format = ssh", "",
+    ].join("\n"));
     vi.stubEnv("GIT_CONFIG_GLOBAL", config);
     vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
     fs.mkdirSync(path.join(root, ".github"));
     git("init", "--quiet", "--template=");
-    git("config", "user.name", "Release fixture");
-    git("config", "user.email", "release@example.invalid");
-    git("config", "gpg.format", "ssh");
     fs.writeFileSync(path.join(root, ".github", "release-signers"), [0, 1].map((index) =>
       `signer-${index} namespaces="git" ${fs.readFileSync(`${keyPath(index)}.pub`, "utf8")}`,
     ).join(""));
     git("-c", `user.signingkey=${keyPath(0)}`, "commit", "--quiet", "--allow-empty", "-S", "-m", "fixture");
     source = git("rev-parse", "HEAD");
-  });
+  }, windowsTimeout);
   afterEach(() => {
     vi.unstubAllEnvs();
     fs.rmSync(root, { recursive: true, force: true });
@@ -211,7 +212,7 @@ describe("verified release tag signer", () => {
       expect(replaced.status).not.toBe(0);
       expect(replaced.stderr).toContain("release tag object changed");
     }
-  });
+  }, windowsTimeout);
 });
 
 describe("immutable release archive", () => {
