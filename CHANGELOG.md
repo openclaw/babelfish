@@ -4,6 +4,8 @@
 
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.
 
+- Update the Vitest test runner to 5.1.1.
+
 - Refresh Vitest to 5.1.0 and CodeQL to 4.39.3, and patch transitive Hono vulnerabilities while retaining Node.js 22.19 support. Thanks @dependabot! #64 #65
 
 - Skip platform and constrained-memory CI for changes limited to contributor guidance and issue or PR templates.
