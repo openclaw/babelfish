@@ -22,6 +22,8 @@
 
 - Skip platform and constrained-memory CI for changes limited to contributor guidance and issue or PR templates.
 
+- Cancel the remaining platform jobs after a failure on a main push. Pull requests and manual CI runs report every platform.
+
 - Refresh the MCP SDK and Node typings, and patch transitive body-parser, fast-uri, ip-address, qs, and Zod vulnerabilities while preserving Node.js 22.19 support. Thanks @dependabot! #59 #60
 
 - Allow Vincent's Git signing key for release tags and record the actual verified tag signer while preserving immutable tag and package proof bindings.
