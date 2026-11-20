@@ -31,26 +31,6 @@ async function writeCommandFixture(root: string, name: string): Promise<void> {
   );
 }
 
-async function writeNamedCliFixture(root: string, plugin: string, command: string): Promise<void> {
-  const target = path.join(root, plugin);
-  await fs.mkdir(target, { recursive: true });
-  await fs.writeFile(path.join(target, "plugin.yaml"), `name: ${plugin}\nversion: 0.0.0\n`);
-  await fs.writeFile(
-    path.join(target, "__init__.py"),
-    `def register(ctx):\n    ctx.register_cli_command('${command}', '${command}', lambda parser: None, lambda args: None, '${command}')\n`,
-  );
-}
-
-async function writeNamedCommandFixture(root: string, plugin: string, command: string): Promise<void> {
-  const target = path.join(root, plugin);
-  await fs.mkdir(target, { recursive: true });
-  await fs.writeFile(path.join(target, "plugin.yaml"), `name: ${plugin}\nversion: 0.0.0\n`);
-  await fs.writeFile(
-    path.join(target, "__init__.py"),
-    `def register(ctx):\n    ctx.register_command('${command}', lambda raw: raw, '${command}')\n`,
-  );
-}
-
 describe("native generated tools", () => {
   it("generates live MCP resource and prompt tools", async () => {
     const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-mcp-state-"));
@@ -201,64 +181,29 @@ await server.connect(new StdioServerTransport());
     ]);
   });
 
-  it("reserves the Babelfish management CLI root", async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-commands-"));
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-package-"));
-    await writeNamedCliFixture(installDir, "client", "babelfish");
-    await fs.mkdir(path.join(root, "skills"), { recursive: true });
-    await fs.writeFile(
-      path.join(root, "openclaw.plugin.json"),
-      JSON.stringify({ id: "babelfish", contracts: {} }, null, 2),
-    );
-
-    await regenerateNativeTools(
-      { installDir, python: "python3", timeoutMs: 10000, env: {} },
-      { root },
-    );
-    const registry = JSON.parse(
-      await fs.readFile(path.join(root, "babelfish.generated.json"), "utf8"),
-    );
-    expect(registry.cliCommands[0]?.name).toBe("babelfish_client_babelfish");
-  });
-
-  it("namespaces OpenClaw CLI roots", async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-commands-"));
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-package-"));
-    await writeNamedCliFixture(installDir, "client", "status");
-    await fs.mkdir(path.join(root, "skills"), { recursive: true });
-    await fs.writeFile(
-      path.join(root, "openclaw.plugin.json"),
-      JSON.stringify({ id: "babelfish", contracts: {} }, null, 2),
-    );
-
-    await regenerateNativeTools(
-      { installDir, python: "python3", timeoutMs: 10000, env: {} },
-      { root },
-    );
-    const registry = JSON.parse(
-      await fs.readFile(path.join(root, "babelfish.generated.json"), "utf8"),
-    );
-    expect(registry.cliCommands[0]?.name).toBe("babelfish_client_status");
-  });
-
-  it("namespaces OpenClaw reserved slash commands", async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-commands-"));
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-package-"));
-    await writeNamedCommandFixture(installDir, "client", "status");
-    await fs.mkdir(path.join(root, "skills"), { recursive: true });
-    await fs.writeFile(
-      path.join(root, "openclaw.plugin.json"),
-      JSON.stringify({ id: "babelfish", contracts: {} }, null, 2),
-    );
-
-    await regenerateNativeTools(
-      { installDir, python: "python3", timeoutMs: 10000, env: {} },
-      { root },
-    );
-    const registry = JSON.parse(
-      await fs.readFile(path.join(root, "babelfish.generated.json"), "utf8"),
-    );
-    expect(registry.commands[0]?.name).toBe("babelfish_client_status");
+  it("namespaces reserved slash commands and CLI roots", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-reserved-commands-"));
+    const installDir = path.join(root, "hermes");
+    const plugin = path.join(installDir, "client");
+    try {
+      await fs.mkdir(plugin, { recursive: true });
+      await fs.writeFile(path.join(plugin, "plugin.yaml"), "name: client\n");
+      await fs.writeFile(path.join(plugin, "__init__.py"), [
+        "def register(ctx):",
+        "    ctx.register_command('status', lambda raw: raw, 'Status')",
+        "    for name in ('babelfish', 'status'):",
+        "        ctx.register_cli_command(name, name, lambda parser: None, lambda args: None, name)",
+      ].join("\n"));
+      await fs.writeFile(path.join(root, "openclaw.plugin.json"), JSON.stringify({ id: "babelfish" }));
+      await regenerateNativeTools({ rootDir: root, installDir, python: "python3", timeoutMs: fixtureTimeoutMs, env: {} }, { root });
+      const registry = JSON.parse(await fs.readFile(path.join(root, "babelfish.generated.json"), "utf8"));
+      expect(registry.commands.map((entry: { name: string }) => entry.name)).toEqual(["babelfish_client_status"]);
+      expect(registry.cliCommands.map((entry: { name: string }) => entry.name)).toEqual([
+        "babelfish_client_babelfish", "babelfish_client_status",
+      ]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 
   it("writes generated registry and OpenClaw manifest tool contracts", async () => {

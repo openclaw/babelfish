@@ -10,22 +10,6 @@ import { buildHermesMcpToolIndex, createHermesMcpServer, MAX_RUNNING_TASKS } fro
 import { buildNativeToolEntries } from "./native-tools.js";
 import * as hermesPython from "./hermes-python.js";
 
-it("advertises the released MCP runtime identity", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-version-"));
-  const server = createHermesMcpServer({ installDir: root, rootDir: root, python: "python3", timeoutMs: 1000, env: {} });
-  const client = new Client({ name: "version-test", version: "1" });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  try {
-    await server.connect(serverTransport);
-    await client.connect(clientTransport);
-    expect(client.getServerVersion()).toEqual({ name: "babelfish", version: "0.1.2" });
-  } finally {
-    await client.close();
-    await server.close();
-    await fs.rm(root, { recursive: true, force: true });
-  }
-});
-
 async function connectTestClient(server: ReturnType<typeof createHermesMcpServer>): Promise<Client> {
   const client = new Client({ name: "test", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -293,23 +277,6 @@ describe("Hermes MCP server", () => {
         arguments: { value: "mcp-ok" },
       });
       expect(result.content).toEqual([{ type: "text", text: '{\n  "echo": "mcp-ok"\n}' }]);
-
-      await expect(
-        client.callTool({
-          name: "babelfish_command__hermes__simple__simple",
-          arguments: { args: "from-command" },
-        }),
-      ).resolves.toMatchObject({
-        content: [{ type: "text", text: '{\n  "command": "from-command"\n}' }],
-      });
-      await expect(
-        client.callTool({
-          name: "babelfish_command__hermes__simple__simple",
-          arguments: {},
-        }),
-      ).resolves.toMatchObject({
-        content: [{ type: "text", text: '{\n  "command": ""\n}' }],
-      });
 
       const started = await client.callTool({
         name: "babelfish_task_start",

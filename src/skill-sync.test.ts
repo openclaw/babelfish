@@ -5,9 +5,12 @@ import { copyFixture } from "../test/hermes-fixtures.js";
 import { syncHermesSkills } from "./skill-sync.js";
 
 describe("syncHermesSkills", () => {
-  it("writes Hermes skills as OpenClaw SKILL.md files", async () => {
+  it("writes current Hermes skills and removes stale generated skills", async () => {
     const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-skills-"));
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-package-"));
+    const staleDir = path.join(rootDir, "skills", "babelfish-generated", "old");
+    await fs.mkdir(staleDir, { recursive: true });
+    await fs.writeFile(path.join(staleDir, "SKILL.md"), "old", "utf-8");
     await copyFixture(installDir);
 
     const written = await syncHermesSkills(
@@ -22,19 +25,7 @@ describe("syncHermesSkills", () => {
     );
     expect(markdown).toContain("name: babelfish-simple-simple_skill");
     expect(markdown).toContain("Simple Skill");
-  });
-
-  it("removes stale generated skills", async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-skills-"));
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-package-"));
-    const staleDir = path.join(rootDir, "skills", "babelfish-generated", "old");
-    await fs.mkdir(staleDir, { recursive: true });
-    await fs.writeFile(path.join(staleDir, "SKILL.md"), "old", "utf-8");
-    await copyFixture(installDir);
-
-    await syncHermesSkills({ installDir, python: "python3", timeoutMs: 10000, env: {} }, rootDir);
-
-    await expect(fs.stat(staleDir)).rejects.toThrow();
+    await expect(fs.stat(staleDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("suffixes generated skill slug collisions", async () => {
