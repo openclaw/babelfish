@@ -28,6 +28,8 @@ if (process.argv[2] !== "--worker") {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-consumer-")));
   const home = path.join(root, "home");
   await fs.mkdir(home);
+  const gitTemplate = path.join(root, "empty-git-template");
+  await fs.mkdir(gitTemplate);
   const config = path.join(root, "empty.npmrc");
   await fs.writeFile(config, "");
   const globalConfig = path.join(root, "empty-global.npmrc");
@@ -40,7 +42,7 @@ if (process.argv[2] !== "--worker") {
     TMPDIR: root, TMP: root, TEMP: root, XDG_CONFIG_HOME: home, XDG_STATE_HOME: home,
     npm_config_userconfig: config, npm_config_globalconfig: globalConfig,
     npm_config_cache: process.env.BABELFISH_CONSUMER_CACHE || defaultCache, npm_config_registry: "https://registry.npmjs.org/",
-    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: config,
+    GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: config, GIT_TEMPLATE_DIR: gitTemplate,
     OPENCLAW_BABELFISH_ROOT: path.join(root, "state"),
     OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR: path.join(root, "state", "hermes"),
     OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS: "15000",
@@ -110,28 +112,37 @@ if (process.argv[2] !== "--worker") {
   await fs.copyFile(path.join(installed, "dist", "bin.js"), standalone);
   assert.match(run(process.execPath, [standalone, "--help"]), /install.*<app>/s);
   assert.match(run(bin, ["--help"]), /install.*<app>/s);
+  reportPhase("installed CLI entry points");
   const write = async (root, relative, contents) => {
     await fs.mkdir(path.dirname(path.join(root, relative)), { recursive: true });
     await fs.writeFile(path.join(root, relative), contents);
   };
-  const commit = (root) => {
+  const commitArgs = [
+    "-c", "user.name=Package Consumer", "-c", "user.email=consumer@example.invalid",
+    "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture",
+  ];
+  const initFixture = (root) => {
     run("git", ["init", "--quiet"], root);
     run("git", ["add", "."], root);
-    run("git", ["-c", "user.name=Package Consumer", "-c", "user.email=consumer@example.invalid", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture"], root);
+    run("git", commitArgs, root);
   };
   const sources = path.join(consumer, "sources");
   const hermes = path.join(sources, "hermes");
   await fs.cp(path.join(packageRoot, "test", "fixtures", "simple-hermes-plugin"), hermes, { recursive: true });
-  commit(hermes);
+  initFixture(hermes);
   for (const app of ["claude-code", "codex"]) {
     const source = path.join(sources, app);
     const manifest = app === "codex" ? ".codex-plugin/plugin.json" : ".claude-plugin/plugin.json";
     await write(source, manifest, JSON.stringify({ name: `${app}-consumer`, skills: "./skills" }));
     await write(source, "skills/demo/SKILL.md", `---\nname: demo\ndescription: ${app} consumer fixture\n---\n\nconsumer skill.\n`);
-    commit(source);
+    initFixture(source);
   }
+  reportPhase("prepare Git fixtures");
   const names = { hermes: "hermes-consumer", "claude-code": "claude-consumer", codex: "codex-consumer" };
-  for (const app of Object.keys(names)) cli(["install", app, path.join(sources, app), "--name", names[app]]);
+  for (const app of Object.keys(names)) {
+    cli(["install", app, path.join(sources, app), "--name", names[app]]);
+    reportPhase(`install ${app} fixture`);
+  }
   const list = () => {
     const result = cli(["list"]);
     for (const app of Object.keys(names)) assert.equal(result.apps.find((entry) => entry.app === app)?.plugins.length, 1);
@@ -146,7 +157,7 @@ if (process.argv[2] !== "--worker") {
     const skill = path.join(installed, "skills", "babelfish-bundles", `${app}-${names[app]}-demo`, "SKILL.md");
     assert((await fs.readFile(skill, "utf8")).includes(`${app} consumer fixture`));
   }
-  reportPhase("CLI installs and generated files");
+  reportPhase("list and generated files");
   const sdk = async (specifier) => {
     const resolved = requireInstalled.resolve(`@modelcontextprotocol/sdk/${specifier}`);
     assert(resolved.startsWith(path.join(consumer, "node_modules") + path.sep));
@@ -272,7 +283,7 @@ if (process.argv[2] !== "--worker") {
   const oldRegistry = await fs.readFile(path.join(installed, "babelfish.generated.json"));
   const oldManifest = await fs.readFile(path.join(installed, "openclaw.plugin.json"));
   await write(hermes, "skills/simple.md", Buffer.from([0xff, 0xfe, 0xfd]));
-  commit(hermes);
+  run("git", [...commitArgs, "--", "skills/simple.md"], hermes);
   let failure;
   try { cli(["install", "hermes", hermes, "--name", names.hermes, "--force"]); } catch (error) { failure = error; }
   assert(failure && failure.status !== 0);

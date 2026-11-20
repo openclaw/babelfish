@@ -8,7 +8,7 @@
 
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
-- Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log.
+- Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log. Fixture preparation and each source app's install have separate timings.
 
 - Load the MCP SDK when a client or server starts, reducing startup time for everyday CLI commands and plugin registration.
 
