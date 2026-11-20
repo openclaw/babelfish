@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Check the package on Node.js 26 in Linux CI and honor the selected npm cache during offline consumer validation.
+
 - Reuse Hermes plugin discovery when generating tools and skills during an install or uninstall.
 
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
@@ -11,6 +13,8 @@
 - Update the Vitest test runner to 5.1.1.
 
 - Refresh Vitest to 5.1.0 and CodeQL to 4.39.3, and patch transitive Hono vulnerabilities while retaining Node.js 22.19 support. Thanks @dependabot! #64 #65
+
+- Run the platform test matrix without repeating fresh package installs when only source test files change.
 
 - Skip platform and constrained-memory CI for changes limited to contributor guidance and issue or PR templates.
 

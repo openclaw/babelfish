@@ -77,7 +77,7 @@ The standalone MCP server is a compatibility fallback for MCP clients; native Op
 
 ## Development
 
-Development requires Node.js 22.19 or newer, npm, Git, and `python3` for the Hermes bridge tests.
+For development, use the Node.js version in [`.nvmrc`](.nvmrc), npm, Git, and `python3` for the Hermes bridge tests.
 
 ```bash
 npm ci

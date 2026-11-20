@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageName = "@openclaw/babelfish";
@@ -24,21 +25,21 @@ if (process.argv[2] !== "--worker") {
   await fs.writeFile(config, "");
   const globalConfig = path.join(root, "empty-global.npmrc");
   await fs.writeFile(globalConfig, "");
+  const offline = process.env.BABELFISH_CONSUMER_OFFLINE === "1";
+  const defaultCache = offline ? process.env.npm_config_cache || path.join(os.homedir(), ".npm") : path.join(root, "cache");
   const env = Object.fromEntries(["PATH", "SystemRoot", "ComSpec", "PATHEXT", "WINDIR", "NODE_OPTIONS"].flatMap((key) => process.env[key] ? [[key, process.env[key]]] : []));
   Object.assign(env, {
     HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
     TMPDIR: root, TMP: root, TEMP: root, XDG_CONFIG_HOME: home, XDG_STATE_HOME: home,
     npm_config_userconfig: config, npm_config_globalconfig: globalConfig,
-    npm_config_cache: process.env.BABELFISH_CONSUMER_CACHE || path.join(root, "cache"), npm_config_registry: "https://registry.npmjs.org/",
+    npm_config_cache: process.env.BABELFISH_CONSUMER_CACHE || defaultCache, npm_config_registry: "https://registry.npmjs.org/",
     GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: config,
     OPENCLAW_BABELFISH_ROOT: path.join(root, "state"),
     OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR: path.join(root, "state", "hermes"),
     OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS: "15000",
   });
-  const offline = process.env.BABELFISH_CONSUMER_OFFLINE === "1";
   if (offline) {
     env.npm_config_offline = "true";
-    env.npm_config_cache = process.env.npm_config_cache || path.join(os.homedir(), ".npm");
   }
   const run = (command, args, cwd, timeout = 120_000) => execFileSync(command, args, { cwd, env, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024, shell: process.platform === "win32" && command.endsWith(".cmd") });
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -136,21 +137,55 @@ if (process.argv[2] !== "--worker") {
   };
   const { Client } = await sdk("client/index.js");
   const { StdioClientTransport } = await sdk("client/stdio.js");
-  const echo = async () => {
+  const withMcp = async (verify) => {
     const transport = new StdioClientTransport({ command: process.execPath, args: [path.join(installed, "dist", "bin.js"), "mcp"], env: process.env, stderr: "pipe" });
     const client = new Client({ name: "package-consumer", version: "1" });
     try {
       await client.connect(transport);
-      assert.deepEqual(client.getServerVersion(), { name: "babelfish", version: "0.1.2" });
-      assert((await client.listTools()).tools.some((tool) => tool.name === "simple_echo"));
-      const result = await client.callTool({ name: "simple_echo", arguments: { value: "immutable-consumer-ok" } });
-      assert(!result.isError);
-      assert.deepEqual(JSON.parse(result.content[0].text), { echo: "immutable-consumer-ok" });
+      await verify(client);
     } finally {
       await client.close();
     }
   };
-  await echo();
+  const call = async (client, name, args) => {
+    const result = await client.callTool({ name, ...(args === undefined ? {} : { arguments: args }) });
+    assert(!result.isError, JSON.stringify(result.content));
+    return JSON.parse(result.content[0].text);
+  };
+  const echo = async (client) => {
+    assert.deepEqual(await call(client, "simple_echo", { value: "immutable-consumer-ok" }), { echo: "immutable-consumer-ok" });
+  };
+  await withMcp(async (client) => {
+    assert.deepEqual(client.getServerVersion(), { name: "babelfish", version: "0.1.2" });
+    const { tools } = await client.listTools();
+    const command = "babelfish_command__hermes__hermes-consumer__simple";
+    assert.deepEqual(tools.map((tool) => tool.name).sort(), [
+      command, "babelfish_plugins_list", "babelfish_task_start", "babelfish_task_status",
+      "babelfish_task_stop", "simple_echo", "simple_optional", "simple_state",
+    ].sort());
+    assert.match(tools.find((tool) => tool.name === command).description, /Args: <raw text>/);
+    for (const args of [undefined, {}, { args: "" }, { args: "explicit text" }]) {
+      assert.deepEqual(await call(client, command, args), { command: args?.args ?? "" });
+    }
+    await echo(client);
+    for (const [args, expected] of [
+      [{ kind: "command", plugin: names.hermes, name: "simple" }, { command: "simple", result: { command: "" } }],
+      [{ kind: "tool", name: "simple_echo", args: { value: "task-ok" } }, { tool: "simple_echo", parsedResult: { echo: "task-ok" } }],
+    ]) {
+      const task = await call(client, "babelfish_task_start", args);
+      assert.equal(task.status, "running");
+      const deadline = Date.now() + 15_000;
+      let status;
+      do {
+        status = await call(client, "babelfish_task_status", { id: task.id });
+        if (status.status !== "running") break;
+        assert(Date.now() < deadline, `Timed out waiting for ${args.name}`);
+        await delay(50);
+      } while (true);
+      assert.equal(status.status, "completed", status.error);
+      assert.partialDeepStrictEqual(status.result, { plugin: names.hermes, ...expected });
+    }
+  });
   await write(consumer, "runtime-import.mjs", `export { default } from "${packageName}";\n`);
   const plugin = (await import(pathToFileURL(path.join(consumer, "runtime-import.mjs")).href)).default;
   assert.equal(plugin.id, "babelfish");
@@ -174,11 +209,18 @@ if (process.argv[2] !== "--worker") {
   const context = { sessionKey: "consumer-session", sessionId: "consumer-session", workspaceDir: consumer };
   try {
     await hooks.get("session_start")({ sessionId: "consumer-session", value: "consumer-start" }, context);
-    const native = factory(context).find((tool) => tool.name === "simple_echo");
-    assert(native);
-    assert(JSON.stringify(await native.execute("consumer-call", { value: "native-consumer-ok" })).includes("native-consumer-ok"));
-    const stateTool = factory(context).find((tool) => tool.name === "simple_state");
-    assert(JSON.stringify(await stateTool.execute("consumer-state", {})).includes("consumer-start"));
+    const tools = factory(context);
+    for (const [name, args, expected] of [
+      ["simple_echo", { value: "native-consumer-ok" }, { echo: "native-consumer-ok" }],
+      ["simple_state", {}, { state: "consumer-start" }],
+    ]) {
+      const tool = tools.find((entry) => entry.name === name);
+      assert(tool, name);
+      const { content, details } = await tool.execute("consumer-call", args);
+      assert.equal(content[0].type, "text");
+      assert.deepEqual(JSON.parse(content[0].text), expected);
+      assert.deepEqual(details, expected);
+    }
   } finally {
     await hooks.get("session_end")({ sessionId: "consumer-session" }, context);
   }
@@ -223,7 +265,7 @@ if (process.argv[2] !== "--worker") {
   assert(!(await fs.readdir(path.join(state, "hermes"))).some((name) => name.startsWith(".babelfish")));
   assert(!(await fs.readdir(installed)).some((name) => name.startsWith(".babelfish")));
   list();
-  await echo();
+  await withMcp(echo);
   for (const app of Object.keys(names)) cli(["uninstall", app, names[app]]);
   assert(cli(["list"]).apps.every((entry) => entry.plugins.length === 0));
 }
