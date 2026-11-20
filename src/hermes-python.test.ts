@@ -159,12 +159,16 @@ describe("Hermes Python bridge", () => {
         "    return [handler, sessionId, openclaw_context['sessionId']]",
         "def register(ctx):",
         "    ctx.register_hook('post_tool_call', callback)",
+        "    def positional(handler, /): return handler['handler']",
+        "    ctx.register_hook('post_tool_call', positional)",
+        "    ctx.register_hook('post_tool_call', lambda event: event['sessionId'])",
+        "    ctx.register_hook('post_tool_call', lambda label='default': label)",
       ].join("\n"));
       const response = await invokeHermesHook(config, {
         hook: "post_tool_call", context,
         kwargs: { handler: "event field", sessionId: "inner", openclaw_context: "ignored" },
       });
-      expect(response.results).toEqual([["event field", "inner", "outer"]]);
+      expect(response.results).toEqual([["event field", "inner", "outer"], "event field", "inner", "default"]);
     } finally {
       releaseHermesBridge(config, context);
       await fs.rm(installDir, { recursive: true, force: true });
