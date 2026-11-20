@@ -12,6 +12,8 @@
 
 - Keep full weekly CodeQL analysis without duplicate main-push scans, protect scheduled/manual runs, and analyze ready-for-review and checkout-attribute PR changes.
 
+- Warm the low-memory image with a production install and run the full package-consumer proof once under the 1 GiB limit.
+
 - Allow Python cold starts in the observer-result test on slower CI runners while retaining dedicated timeout coverage.
 - Update the pinned CodeQL actions to 4.39.0 for repository security scanning. Thanks @dependabot.
 - Run macOS CI on the Apple Silicon Xcode 27 image while retaining Node.js 22.19 support.
