@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { onTestFinished } from "vitest";
+import { copyFixture } from "../test/hermes-fixtures.js";
 import {
   callHermesCliCommand,
   callHermesCommand,
@@ -12,11 +13,6 @@ import {
   readHermesSkill,
   releaseHermesBridge,
 } from "./hermes-python.js";
-
-async function copyFixture(target: string): Promise<void> {
-  const fixture = path.join(process.cwd(), "test/fixtures/simple-hermes-plugin");
-  await fs.cp(fixture, path.join(target, "simple"), { recursive: true });
-}
 
 async function tempInstallDir(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-"));
@@ -146,6 +142,32 @@ describe("Hermes Python bridge", () => {
       }
     } finally {
       await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("passes event keywords through async callbacks and keeps printed output off the protocol", async () => {
+    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-event-"));
+    const plugin = path.join(installDir, "observer");
+    const config = { installDir, python: "python3", timeoutMs: 10000, env: {} };
+    const context = { sessionId: "outer" };
+    try {
+      await fs.mkdir(plugin);
+      await fs.writeFile(path.join(plugin, "plugin.yaml"), "name: observer\n");
+      await fs.writeFile(path.join(plugin, "__init__.py"), [
+        "async def callback(*, handler, sessionId, openclaw_context):",
+        "    print('observer output')",
+        "    return [handler, sessionId, openclaw_context['sessionId']]",
+        "def register(ctx):",
+        "    ctx.register_hook('post_tool_call', callback)",
+      ].join("\n"));
+      const response = await invokeHermesHook(config, {
+        hook: "post_tool_call", context,
+        kwargs: { handler: "event field", sessionId: "inner", openclaw_context: "ignored" },
+      });
+      expect(response.results).toEqual([["event field", "inner", "outer"]]);
+    } finally {
+      releaseHermesBridge(config, context);
+      await fs.rm(installDir, { recursive: true, force: true });
     }
   });
 

@@ -61,12 +61,24 @@ function tarball(overrides: Record<string, unknown> = {}, extra?: { name: string
 describe("verified release tag signer", () => {
   let root: string;
   let source: string;
+  let keyDir: string;
   let fingerprints: string[];
+  const keyPath = (index: number) => path.join(keyDir, `key-${index}`);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
   const signTag = (tag: string, key: number) => {
-    git("-c", `user.signingkey=${path.join(root, `key-${key}`)}`, "tag", "-s", "-m", "release fixture", tag);
+    git("-c", `user.signingkey=${keyPath(key)}`, "tag", "-s", "-m", "release fixture", tag);
     return git("rev-parse", `refs/tags/${tag}`);
   };
+  beforeAll(() => {
+    keyDir = fs.mkdtempSync(path.join(os.tmpdir(), "babelfish-signer-keys-"));
+    fingerprints = [0, 1, 2].map((index) => {
+      const key = keyPath(index);
+      execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", key]);
+      return execFileSync("ssh-keygen", ["-lf", `${key}.pub`, "-E", "sha256"], { encoding: "utf8" }).split(" ")[1];
+    });
+  });
+  afterAll(() => fs.rmSync(keyDir, { recursive: true, force: true }));
+
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "babelfish-release-signer-"));
     const config = path.join(root, "gitconfig");
@@ -78,15 +90,10 @@ describe("verified release tag signer", () => {
     git("config", "user.name", "Release fixture");
     git("config", "user.email", "release@example.invalid");
     git("config", "gpg.format", "ssh");
-    fingerprints = [0, 1, 2].map((index) => {
-      const key = path.join(root, `key-${index}`);
-      execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", key]);
-      return execFileSync("ssh-keygen", ["-lf", `${key}.pub`, "-E", "sha256"], { encoding: "utf8" }).split(" ")[1];
-    });
     fs.writeFileSync(path.join(root, ".github", "release-signers"), [0, 1].map((index) =>
-      `signer-${index} namespaces="git" ${fs.readFileSync(path.join(root, `key-${index}.pub`), "utf8")}`,
+      `signer-${index} namespaces="git" ${fs.readFileSync(`${keyPath(index)}.pub`, "utf8")}`,
     ).join(""));
-    git("-c", `user.signingkey=${path.join(root, "key-0")}`, "commit", "--quiet", "--allow-empty", "-S", "-m", "fixture");
+    git("-c", `user.signingkey=${keyPath(0)}`, "commit", "--quiet", "--allow-empty", "-S", "-m", "fixture");
     source = git("rev-parse", "HEAD");
   });
   afterEach(() => {

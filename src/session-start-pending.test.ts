@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { hookTestApi } from "../test/hook-api.js";
 
 describe("rejected session start", () => {
   it.each([
@@ -36,12 +37,7 @@ describe("rejected session start", () => {
     const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
     try {
       const entry = (await import("./index.js")).default;
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      entry.register(hookTestApi(hooks));
       const session = { sessionId: "replaced" };
       await hooks.get("session_start")!({}, session);
       const ending = hooks.get(eventName)!({}, session);
@@ -99,12 +95,7 @@ describe("rejected session start", () => {
     const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
     try {
       const entry = (await import("./index.js")).default;
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      entry.register(hookTestApi(hooks));
       const session = { sessionId: "lifecycle" };
       let start = hooks.get("session_start")!({}, session);
       if (mode === "replacement") await start;
@@ -157,12 +148,7 @@ describe("rejected session start", () => {
       ].join("\n"));
       vi.resetModules();
       const entry = (await import("./index.js")).default;
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      entry.register(hookTestApi(hooks));
       const start = hooks.get("session_start")!({}, session);
       const prepare = hooks.get("agent_turn_prepare")!({}, session);
       await expect(prepare).resolves.toEqual({ prependContext: "initialized" });
@@ -256,15 +242,12 @@ describe("rejected session start", () => {
         "",
       ].join("\n"),
     );
-    const previousPluginDir = process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR;
-    const previousRoot = process.env.OPENCLAW_BABELFISH_ROOT;
-    const previousTimeout = process.env.OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS;
     const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
     const session = { sessionId: "slow-session" };
     try {
-      process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR = installDir;
-      process.env.OPENCLAW_BABELFISH_ROOT = bundleRoot;
-      process.env.OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS = "200";
+      vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", installDir);
+      vi.stubEnv("OPENCLAW_BABELFISH_ROOT", bundleRoot);
+      vi.stubEnv("OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS", "200");
       vi.resetModules();
       const module = await import("./index.js");
       const logger = { warn: vi.fn() };
@@ -293,21 +276,7 @@ describe("rejected session start", () => {
         String(message).startsWith("Babelfish session start failed:"))).toHaveLength(1);
     } finally {
       await hooks.get("session_end")?.({ sessionId: "slow-session" }, session);
-      if (previousPluginDir === undefined) {
-        delete process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR;
-      } else {
-        process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR = previousPluginDir;
-      }
-      if (previousRoot === undefined) {
-        delete process.env.OPENCLAW_BABELFISH_ROOT;
-      } else {
-        process.env.OPENCLAW_BABELFISH_ROOT = previousRoot;
-      }
-      if (previousTimeout === undefined) {
-        delete process.env.OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS;
-      } else {
-        process.env.OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS = previousTimeout;
-      }
+      vi.unstubAllEnvs();
       await fs.rm(installDir, { recursive: true, force: true });
       await fs.rm(bundleRoot, { recursive: true, force: true });
     }

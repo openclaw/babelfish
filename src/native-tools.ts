@@ -2,6 +2,9 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { asObject, stringifyResult, type JsonObject } from "./json.js";
+import { namedHermesTools } from "./hermes-tools.js";
+import { duplicateNames, sanitizeName, uniqueName } from "./tool-names.js";
 import { isSupportedApp, requireApp, SUPPORTED_APPS, type BabelfishConfig, type SupportedApp } from "./config.js";
 import {
   callBundleMcp,
@@ -16,7 +19,6 @@ import {
   type HermesCommandSummary,
   type HermesListResult,
   type HermesRuntimeContext,
-  type HermesToolSummary,
 } from "./hermes-python.js";
 import { listInstalledPlugins } from "./plugin-inventory.js";
 import { syncHermesSkills } from "./skill-sync.js";
@@ -43,8 +45,6 @@ const OPENCLAW_CLI_ROOTS = [
   "hooks", "webhooks", "qr", "clawbot", "pairing", "plugins", "channels", "directory",
   "security", "secrets", "skills", "update", "completion", "babelfish",
 ];
-
-type JsonObject = Record<string, unknown>;
 
 export type NativeToolContext = {
   workspaceDir?: string;
@@ -112,75 +112,12 @@ export type GeneratedNativeToolRegistry = {
   outputStyles: GeneratedOutputStyleEntry[];
 };
 
-function asObject(value: unknown): JsonObject | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonObject)
-    : undefined;
-}
-
-function sanitizeName(value: string): string {
-  const cleaned = value.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-  return cleaned || "plugin";
-}
-
 function skillSlug(value: string): string {
   return sanitizeName(value).replaceAll("_", "-").toLowerCase();
 }
 
-function stringifyResult(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
-}
-
 function result(value: unknown): { content: Array<{ type: "text"; text: string }>; details: unknown } {
   return { content: [{ type: "text", text: stringifyResult(value) }], details: value };
-}
-
-function inputSchemaFor(tool: HermesToolSummary): JsonObject {
-  const schema = asObject(tool.schema);
-  const parameters = asObject(schema?.parameters) ?? asObject(asObject(schema?.function)?.parameters);
-  if (parameters?.type === "object") {
-    return parameters;
-  }
-  if (schema?.type === "object") {
-    return schema;
-  }
-  return { type: "object", additionalProperties: true };
-}
-
-function generatedToolName(params: {
-  plugin: string;
-  tool: string;
-  duplicates: Set<string>;
-}): string {
-  if (
-    !params.duplicates.has(params.tool) &&
-    !NATIVE_BRIDGE_TOOL_NAMES.includes(params.tool as (typeof NATIVE_BRIDGE_TOOL_NAMES)[number])
-  ) {
-    return params.tool;
-  }
-  return `${sanitizeName(params.plugin)}__${sanitizeName(params.tool)}`;
-}
-
-function uniqueName(base: string, used: Set<string>): string {
-  let candidate = base;
-  let suffix = 2;
-  while (used.has(candidate)) {
-    candidate = `${base}_${suffix}`;
-    suffix += 1;
-  }
-  used.add(candidate);
-  return candidate;
-}
-
-function uniqueSkillName(base: string, used: Set<string>): string {
-  let candidate = base.replaceAll("_", "-");
-  let suffix = 2;
-  while (used.has(candidate)) {
-    candidate = `${base.replaceAll("_", "-")}-${suffix}`;
-    suffix += 1;
-  }
-  used.add(candidate);
-  return candidate;
 }
 
 function commandBaseName(command: string): string {
@@ -198,41 +135,16 @@ function commandName(params: { plugin: string; command: string; duplicates: Set<
 }
 
 export function buildNativeToolEntries(list: HermesListResult): NativeToolEntry[] {
-  const counts = new Map<string, number>();
-  for (const plugin of list.plugins) {
-    for (const tool of plugin.tools) {
-      if (tool.available) {
-        counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
-      }
-    }
-  }
-  const duplicates = new Set(
-    [...counts.entries()].filter(([, count]) => count > 1).map(([name]) => name),
-  );
-  const entries: NativeToolEntry[] = [];
-  const usedNames = new Set<string>(NATIVE_BRIDGE_TOOL_NAMES);
-
-  for (const plugin of list.plugins) {
-    for (const tool of plugin.tools) {
-      if (!tool.available) {
-        continue;
-      }
-      entries.push({
-        kind: "tool",
-        app: "hermes",
-        name: uniqueName(
-          generatedToolName({ plugin: plugin.key, tool: tool.name, duplicates }),
-          usedNames,
-        ),
-        plugin: plugin.key,
-        originalName: tool.name,
-        description: tool.description || `Plugin tool ${plugin.key}/${tool.name}`,
-        inputSchema: inputSchemaFor(tool),
-      });
-    }
-  }
-
-  return entries.sort((a, b) => a.name.localeCompare(b.name));
+  const tools = namedHermesTools(list, new Set(NATIVE_BRIDGE_TOOL_NAMES));
+  return Array.from(tools, ({ plugin, tool, name, inputSchema }): NativeToolEntry => ({
+    kind: "tool",
+    app: "hermes",
+    name,
+    plugin,
+    originalName: tool.name,
+    description: tool.description || `Plugin tool ${plugin}/${tool.name}`,
+    inputSchema,
+  })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function buildCommandEntries(
@@ -240,37 +152,21 @@ function buildCommandEntries(
   select: (plugin: HermesListResult["plugins"][number]) => HermesCommandSummary[],
   reservedNames: string[] = [],
 ): GeneratedCommandEntry[] {
-  const counts = new Map<string, number>();
-  for (const plugin of list.plugins) {
-    for (const command of select(plugin)) {
-      if (command.available) {
-        const key = commandBaseName(command.name) || `${plugin.key}/${command.name}`;
-        counts.set(key, (counts.get(key) ?? 0) + 1);
-      }
-    }
-  }
-  const duplicates = new Set(
-    [...counts.entries()].filter(([, count]) => count > 1).map(([name]) => name),
-  );
-  for (const name of reservedNames) {
-    duplicates.add(name);
-  }
+  const available = list.plugins.flatMap((plugin) => select(plugin)
+    .filter((command) => command.available)
+    .map((command) => ({ plugin: plugin.key, command })));
+  const duplicates = duplicateNames(available, ({ plugin, command }) =>
+    commandBaseName(command.name) || `${plugin}/${command.name}`);
+  for (const name of reservedNames) duplicates.add(name);
   const usedNames = new Set(reservedNames);
-  return list.plugins.flatMap((plugin) =>
-    select(plugin)
-      .filter((entry) => entry.available)
-      .map((entry) => ({
-        app: "hermes" as const,
-        name: uniqueName(
-          commandName({ plugin: plugin.key, command: entry.name, duplicates }),
-          usedNames,
-        ),
-        plugin: plugin.key,
-        originalName: entry.name,
-        description: entry.description || `Run plugin command ${plugin.key}/${entry.name}`,
-        argsHint: entry.argsHint,
-      })),
-  ).sort((a, b) => a.name.localeCompare(b.name));
+  return available.map(({ plugin, command }) => ({
+    app: "hermes" as const,
+    name: uniqueName(commandName({ plugin, command: command.name, duplicates }), usedNames),
+    plugin,
+    originalName: command.name,
+    description: command.description || `Run plugin command ${plugin}/${command.name}`,
+    argsHint: command.argsHint,
+  })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function registryPath(root = packageRoot): string {
@@ -466,9 +362,10 @@ async function importSkillEntries(
   for (const entry of await fsp.readdir(path.join(sourceRoot, relative), { withFileTypes: true })) {
     const nextRelative = path.join(relative, entry.name);
     const source = path.join(sourceRoot, nextRelative);
-    const name = uniqueSkillName(
+    const name = uniqueName(
       `${prefix}-${skillSlug(nextRelative.replace(/\.md$/i, ""))}`,
       usedNames,
+      "-",
     );
     if (entry.isSymbolicLink()) {
       throw new Error(`Imported skill tree contains a symlink: ${source}`);
@@ -497,9 +394,10 @@ async function syncBundleSkills(plugins: BundlePlugin[], root: string): Promise<
     for (const sourceRoot of plugin.skillDirs) {
       const directSkill = path.join(sourceRoot, "SKILL.md");
       if (fs.existsSync(directSkill)) {
-        const name = uniqueSkillName(
+        const name = uniqueName(
           `${skillSlug(plugin.app)}-${skillSlug(plugin.key)}-${skillSlug(path.basename(sourceRoot))}`,
           usedNames,
+          "-",
         );
         await copySkillDirectory(sourceRoot, path.join(targetRoot, name), name);
         continue;
@@ -566,15 +464,12 @@ async function buildBundleToolEntries(
       }
     }
   }
-  const counts = new Map<string, number>();
-  for (const entry of entries) {
-    counts.set(entry.name, (counts.get(entry.name) ?? 0) + 1);
-  }
+  const duplicates = duplicateNames(entries, (entry) => entry.name);
   const used = new Set<string>([...NATIVE_BRIDGE_TOOL_NAMES, ...reservedNames]);
   return entries.map((entry) => ({
     ...entry,
     name: uniqueName(
-      counts.get(entry.name) === 1 && !used.has(entry.name)
+      !duplicates.has(entry.name) && !used.has(entry.name)
         ? entry.name
         : `${sanitizeName(entry.plugin)}__${sanitizeName(entry.name)}`,
       used,

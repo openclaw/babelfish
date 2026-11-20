@@ -6,13 +6,15 @@ import {
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import { asObject, stringifyResult } from "./json.js";
+import { namedHermesTools } from "./hermes-tools.js";
+import { sanitizeName, uniqueName } from "./tool-names.js";
 import type { HermesBridgeConfig } from "./config.js";
 import {
   callHermesTool,
   callHermesCommand,
   listHermesPlugins,
   type HermesListResult,
-  type HermesToolSummary,
 } from "./hermes-python.js";
 import { syncHermesSkills } from "./skill-sync.js";
 
@@ -27,7 +29,6 @@ export type HermesMcpToolIndex = {
   commandRoutes: Map<string, HermesMcpRoute>;
 };
 
-type JsonObject = Record<string, unknown>;
 const BRIDGE_TOOL_NAMES = new Set([
   "babelfish_plugins_list",
   "babelfish_task_start",
@@ -59,53 +60,6 @@ function trimFinishedTasks(): void {
   for (const task of finished.slice(0, -MAX_FINISHED_TASKS)) {
     tasks.delete(task.id);
   }
-}
-
-function asObject(value: unknown): JsonObject | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonObject)
-    : undefined;
-}
-
-function sanitizeName(value: string): string {
-  const cleaned = value.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
-  return cleaned || "plugin";
-}
-
-function uniqueName(base: string, used: Set<string>): string {
-  let name = base;
-  for (let suffix = 2; used.has(name); suffix += 1) {
-    name = `${base}_${suffix}`;
-  }
-  used.add(name);
-  return name;
-}
-
-function inputSchemaFor(tool: HermesToolSummary): Tool["inputSchema"] {
-  const schema = asObject(tool.schema);
-  const parameters = asObject(schema?.parameters) ?? asObject(asObject(schema?.function)?.parameters);
-  if (parameters?.type === "object") {
-    return parameters as Tool["inputSchema"];
-  }
-  if (schema?.type === "object") {
-    return schema as Tool["inputSchema"];
-  }
-  return { type: "object", additionalProperties: true };
-}
-
-function stringifyResult(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
-}
-
-function mcpToolName(params: {
-  plugin: string;
-  tool: string;
-  duplicates: Set<string>;
-}): string {
-  if (!params.duplicates.has(params.tool) && !BRIDGE_TOOL_NAMES.has(params.tool)) {
-    return params.tool;
-  }
-  return `${sanitizeName(params.plugin)}__${sanitizeName(params.tool)}`;
 }
 
 function commandToolName(plugin: string, command: string): string {
@@ -202,46 +156,25 @@ function commandTools(
 }
 
 export function buildHermesMcpToolIndex(list: HermesListResult): HermesMcpToolIndex {
-  const counts = new Map<string, number>();
-  for (const plugin of list.plugins) {
-    for (const tool of plugin.tools) {
-      if (tool.available) {
-        counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
-      }
-    }
-  }
-
-  const duplicates = new Set(
-    [...counts.entries()].filter(([, count]) => count > 1).map(([name]) => name),
-  );
   const toolRoutes = new Map<string, HermesMcpRoute>();
   const tools: Tool[] = [];
   const usedNames = new Set(BRIDGE_TOOL_NAMES);
 
-  for (const plugin of list.plugins) {
-    for (const hermesTool of plugin.tools) {
-      if (!hermesTool.available) {
-        continue;
-      }
-      const name = uniqueName(
-        mcpToolName({ plugin: plugin.key, tool: hermesTool.name, duplicates }),
-        usedNames,
-      );
-      toolRoutes.set(name, { plugin: plugin.key, name: hermesTool.name });
-      tools.push({
-        name,
-        description: hermesTool.description || `Imported tool ${plugin.key}/${hermesTool.name}`,
-        inputSchema: inputSchemaFor(hermesTool),
-        _meta: {
-          "babelfish/app": "hermes",
-          "babelfish/plugin": plugin.key,
-          "babelfish/tool": hermesTool.name,
-          "babelfish/toolset": hermesTool.toolset,
-          "babelfish/available": hermesTool.available,
-          "babelfish/requiresEnv": hermesTool.requiresEnv,
-        },
-      });
-    }
+  for (const { name, plugin, tool, inputSchema } of namedHermesTools(list, usedNames)) {
+    toolRoutes.set(name, { plugin, name: tool.name });
+    tools.push({
+      name,
+      description: tool.description || `Imported tool ${plugin}/${tool.name}`,
+      inputSchema: inputSchema as Tool["inputSchema"],
+      _meta: {
+        "babelfish/app": "hermes",
+        "babelfish/plugin": plugin,
+        "babelfish/tool": tool.name,
+        "babelfish/toolset": tool.toolset,
+        "babelfish/available": tool.available,
+        "babelfish/requiresEnv": tool.requiresEnv,
+      },
+    });
   }
 
   tools.sort((a, b) => a.name.localeCompare(b.name));
