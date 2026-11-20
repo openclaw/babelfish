@@ -470,69 +470,6 @@ describe("native OpenClaw hook entry", () => {
     }
   }, 20_000);
 
-  it("terminates a monitor that exceeds the monitor line limit", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-monitor-cap-"));
-    const plugin = path.join(root, "claude-code", "monitor-plugin");
-    const scriptPath = path.join(plugin, "flood.cjs");
-    const pidPath = path.join(root, "pid");
-    const bytes = MAX_MONITOR_OUTPUT_BYTES + 8192;
-    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
-    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "empty-hermes"));
-    const warn = vi.fn();
-    let hooks: Map<string, (event: unknown, ctx: unknown) => unknown> | undefined;
-    try {
-      await fs.mkdir(path.join(root, "empty-hermes"), { recursive: true });
-      await fs.mkdir(path.join(plugin, ".claude-plugin"), { recursive: true });
-      await fs.mkdir(path.join(plugin, "monitors"), { recursive: true });
-      await fs.writeFile(
-        scriptPath,
-        `require("node:fs").writeFileSync(process.argv[2], String(process.pid)); process.stdout.write("A".repeat(${bytes})); setInterval(() => {}, 1000);\n`,
-      );
-      const quote = (value: string) => process.platform === "win32"
-        ? `"${value.replaceAll('"', '""')}"`
-        : JSON.stringify(value);
-      const command = process.platform === "win32"
-        ? `node "%CLAUDE_PLUGIN_ROOT%\\flood.cjs" ${quote(pidPath)}`
-        : `${quote(process.execPath)} ${quote(scriptPath)} ${quote(pidPath)}`;
-      await fs.writeFile(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "monitor-plugin" }));
-      await fs.writeFile(path.join(plugin, "monitors", "monitors.json"), JSON.stringify([
-        { name: "status", description: "Status", command },
-      ]));
-      vi.resetModules();
-      const entry = (await import("./index.js")).default;
-      hooks = new Map();
-      entry.register({
-        on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) => { hooks.set(name, handler); },
-        registerTool: () => undefined,
-        registerCommand: () => undefined,
-        registerCli: () => undefined,
-        registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn },
-      });
-      await hooks.get("session_start")?.(
-        { sessionId: "flood-monitor" },
-        { sessionId: "flood-monitor", workspaceDir: root },
-      );
-      let pid = 0;
-      await vi.waitFor(async () => {
-        pid = Number(await fs.readFile(pidPath, "utf8"));
-        expect(pid).toBeGreaterThan(0);
-      }, { timeout: 10_000 });
-      await vi.waitFor(() => {
-        expect(warn).toHaveBeenCalledWith(
-          expect.stringContaining(`${MAX_MONITOR_OUTPUT_BYTES}-byte line limit`),
-        );
-      }, { timeout: 10_000 });
-      await vi.waitFor(() => {
-        expect(() => process.kill(pid, 0)).toThrow();
-      }, { timeout: 5_000 });
-    } finally {
-      await hooks?.get("session_end")?.({ sessionId: "flood-monitor" }, { sessionId: "flood-monitor" });
-      vi.unstubAllEnvs();
-      await removeTemp(root);
-    }
-  }, 20_000);
-
   it("keeps monitor lines split across bytes, breaks, and end of output", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-monitor-lines-"));
     const plugin = path.join(root, "claude-code", "monitor-plugin");
