@@ -383,7 +383,7 @@ describe("Hermes Python bridge", () => {
     ).resolves.toMatchObject({ plugin: "real", text: "exact" });
   });
 
-  it("rejects an ambiguous manifest alias", async () => {
+  it("reports ambiguous selectors, ambiguous registrations, and missing registrations", async () => {
     const installDir = await tempInstallDir();
     await writeRoutingFixture(installDir, "first", "shared-alias", "first");
     await writeRoutingFixture(installDir, "second", "shared-alias", "second");
@@ -392,5 +392,9 @@ describe("Hermes Python bridge", () => {
     await expect(
       callHermesTool(config, { plugin: "shared-alias", tool: "shared", args: {} }),
     ).rejects.toThrow("Plugin selector 'shared-alias' is ambiguous");
+    await expect(callHermesCommand(config, { command: "/shared", args: "" }))
+      .rejects.toThrow("Plugin command 'shared' is ambiguous. Specify plugin. Matches: first, second");
+    await expect(readHermesSkill(config, { skill: "missing" }))
+      .rejects.toThrow("Plugin skill not found: missing");
   });
 });

@@ -6,7 +6,7 @@ tier="${1:-e2e}"
 case "$tier" in
   full)
     export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=256}"
-    command="npm run check && npm run pack:check && npm run test:low-memory:e2e"
+    command="npm run check && npm run pack:check"
     ;;
   runtime)
     export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=128}"

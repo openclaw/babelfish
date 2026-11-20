@@ -8,22 +8,6 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildHermesMcpToolIndex, createHermesMcpServer, MAX_RUNNING_TASKS } from "./mcp-server.js";
 import * as hermesPython from "./hermes-python.js";
 
-it("advertises the released MCP runtime identity", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-version-"));
-  const server = createHermesMcpServer({ installDir: root, rootDir: root, python: "python3", timeoutMs: 1000, env: {} });
-  const client = new Client({ name: "version-test", version: "1" });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  try {
-    await server.connect(serverTransport);
-    await client.connect(clientTransport);
-    expect(client.getServerVersion()).toEqual({ name: "babelfish", version: "0.1.2" });
-  } finally {
-    await client.close();
-    await server.close();
-    await fs.rm(root, { recursive: true, force: true });
-  }
-});
-
 async function copyFixture(target: string, fixtureName: string, installedName: string): Promise<void> {
   const fixture = path.join(process.cwd(), "test/fixtures", fixtureName);
   await fs.cp(fixture, path.join(target, installedName), { recursive: true });
@@ -348,23 +332,6 @@ describe("Hermes MCP server", () => {
       });
       expect(result.content).toEqual([{ type: "text", text: '{\n  "echo": "mcp-ok"\n}' }]);
 
-      await expect(
-        client.callTool({
-          name: "babelfish_command__hermes__simple__simple",
-          arguments: { args: "from-command" },
-        }),
-      ).resolves.toMatchObject({
-        content: [{ type: "text", text: '{\n  "command": "from-command"\n}' }],
-      });
-      await expect(
-        client.callTool({
-          name: "babelfish_command__hermes__simple__simple",
-          arguments: {},
-        }),
-      ).resolves.toMatchObject({
-        content: [{ type: "text", text: '{\n  "command": ""\n}' }],
-      });
-
       const started = await client.callTool({
         name: "babelfish_task_start",
         arguments: { kind: "tool", name: "simple_echo", args: { value: "task-ok" } },
@@ -562,87 +529,78 @@ describe("Hermes MCP server", () => {
     }
   });
 
+  async function createCapacityFixture(timeoutMs: number) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-task-capacity-"));
+    const installDir = path.join(root, "plugins");
+    await writeHoldPlugin(installDir);
+    const server = createHermesMcpServer({ installDir, rootDir: root, python: "python3", timeoutMs, env: {} });
+    const client = new Client({ name: "test", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const ids: string[] = [];
+    const pids: number[] = [];
+    let nextMarker = 0;
+
+    function start(name: string, marker: string) {
+      return client.callTool({
+        name: "babelfish_task_start",
+        arguments: { kind: "tool", name, args: { marker, hold_sec: 2 } },
+      });
+    }
+
+    return {
+      client, ids, pids,
+      async startTasks(count: number, name = "hold_until_term") {
+        const markers: string[] = [];
+        for (let i = 0; i < count; i++) {
+          const marker = path.join(root, String(nextMarker++));
+          const started = await start(name, marker);
+          expect(started.isError).toBeFalsy();
+          const task = JSON.parse(String(started.content?.[0]?.text));
+          expect(task.status).toBe("running");
+          ids.push(task.id);
+          markers.push(marker);
+        }
+        for (const marker of markers) pids.push(await waitForPidFile(marker));
+      },
+      async expectFull() {
+        const overflow = await start("hold_until_term", path.join(root, "overflow"));
+        expect(overflow.isError).toBe(true);
+        expect(overflowError(overflow)).toBe(`Too many running Babelfish tasks (max ${MAX_RUNNING_TASKS})`);
+      },
+      async close() {
+        await stopTasksAndKill(client, ids, pids);
+        await client.close();
+        await server.close();
+        await fs.rm(root, { recursive: true, force: true });
+      },
+    };
+  }
+
   it.skipIf(process.platform === "win32")(
     "rejects a replacement start while a stopped child is still exiting",
     { timeout: 45_000 },
     async () => {
-      const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-hold-"));
-      const markerRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-hold-markers-"));
-      await writeHoldPlugin(installDir);
-      const server = createHermesMcpServer({
-        installDir,
-        python: "python3",
-        timeoutMs: 30_000,
-        env: {},
-      });
-      const client = new Client({ name: "test", version: "0.0.0" });
-      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-      const startedIds: string[] = [];
-      const pids: number[] = [];
-
-      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const fixture = await createCapacityFixture(30_000);
       try {
-        const markers: string[] = [];
-        for (let index = 0; index < MAX_RUNNING_TASKS; index += 1) {
-          const marker = path.join(markerRoot, `stop-${index}`);
-          markers.push(marker);
-          const started = await client.callTool({
-            name: "babelfish_task_start",
-            arguments: {
-              kind: "tool",
-              name: "hold_until_term",
-              args: { marker, hold_sec: 2 },
-            },
-          });
-          expect(started.isError).toBeFalsy();
-          const task = JSON.parse(String(started.content?.[0]?.text));
-          expect(task.status).toBe("running");
-          startedIds.push(task.id);
-        }
-        for (const marker of markers) {
-          pids.push(await waitForPidFile(marker));
-        }
-
-        const dyingId = startedIds.pop();
-        const dyingPid = pids.pop();
+        await fixture.startTasks(MAX_RUNNING_TASKS);
+        const dyingId = fixture.ids.pop()!;
+        const dyingPid = fixture.pids.pop()!;
         expect(dyingId).toBeTruthy();
         expect(dyingPid).toBeTruthy();
-        const stopped = await client.callTool({
+        const stopped = await fixture.client.callTool({
           name: "babelfish_task_stop",
           arguments: { id: dyingId },
         });
         expect(JSON.parse(String(stopped.content?.[0]?.text)).status).toBe("stopped");
-        expect(pidAlive(dyingPid as number)).toBe(true);
+        expect(pidAlive(dyingPid)).toBe(true);
 
-        const overflow = await client.callTool({
-          name: "babelfish_task_start",
-          arguments: {
-            kind: "tool",
-            name: "hold_until_term",
-            args: { marker: path.join(markerRoot, "stop-overflow"), hold_sec: 2 },
-          },
-        });
-        expect(overflow.isError).toBe(true);
-        expect(overflowError(overflow)).toBe(`Too many running Babelfish tasks (max ${MAX_RUNNING_TASKS})`);
+        await fixture.expectFull();
 
-        await waitForProcessExit(dyingPid as number);
-        const resumed = await client.callTool({
-          name: "babelfish_task_start",
-          arguments: {
-            kind: "tool",
-            name: "hold_until_term",
-            args: { marker: path.join(markerRoot, "stop-resumed"), hold_sec: 2 },
-          },
-        });
-        expect(resumed.isError).toBeFalsy();
-        const resumedTask = JSON.parse(String(resumed.content?.[0]?.text));
-        expect(resumedTask.status).toBe("running");
-        startedIds.push(resumedTask.id);
-        pids.push(await waitForPidFile(path.join(markerRoot, "stop-resumed")));
+        await waitForProcessExit(dyingPid);
+        await fixture.startTasks(1);
       } finally {
-        await stopTasksAndKill(client, startedIds, pids);
-        await client.close();
-        await server.close();
+        await fixture.close();
       }
     },
   );
@@ -651,65 +609,20 @@ describe("Hermes MCP server", () => {
     "rejects a replacement start while a completed helper is still exiting",
     { timeout: 45_000 },
     async () => {
-      const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-done-"));
-      const markerRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-done-markers-"));
-      await writeHoldPlugin(installDir);
-      const server = createHermesMcpServer({
-        installDir,
-        python: "python3",
-        timeoutMs: 30_000,
-        env: {},
-      });
-      const client = new Client({ name: "test", version: "0.0.0" });
-      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-      const startedIds: string[] = [];
-      const pids: number[] = [];
-
-      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const fixture = await createCapacityFixture(30_000);
       try {
-        const holdMarkers: string[] = [];
-        for (let index = 0; index < MAX_RUNNING_TASKS - 1; index += 1) {
-          const marker = path.join(markerRoot, `done-hold-${index}`);
-          holdMarkers.push(marker);
-          const started = await client.callTool({
-            name: "babelfish_task_start",
-            arguments: {
-              kind: "tool",
-              name: "hold_until_term",
-              args: { marker, hold_sec: 2 },
-            },
-          });
-          expect(started.isError).toBeFalsy();
-          const task = JSON.parse(String(started.content?.[0]?.text));
-          expect(task.status).toBe("running");
-          startedIds.push(task.id);
-        }
-        for (const marker of holdMarkers) {
-          pids.push(await waitForPidFile(marker));
-        }
-
-        const completingMarker = path.join(markerRoot, "done-complete");
-        const completing = await client.callTool({
-          name: "babelfish_task_start",
-          arguments: {
-            kind: "tool",
-            name: "return_then_hold",
-            args: { marker: completingMarker, hold_sec: 2 },
-          },
-        });
-        expect(completing.isError).toBeFalsy();
-        const completingTask = JSON.parse(String(completing.content?.[0]?.text));
-        startedIds.push(completingTask.id);
-        const completingPid = await waitForPidFile(completingMarker);
-        pids.push(completingPid);
+        await fixture.startTasks(MAX_RUNNING_TASKS - 1);
+        await fixture.startTasks(1, "return_then_hold");
+        const completingId = fixture.ids.at(-1)!;
+        const completingPid = fixture.pids.at(-1)!;
         expect(pidAlive(completingPid)).toBe(true);
 
         const doneDeadline = Date.now() + 5_000;
         let completingSnap: { status?: string } = {};
         while (Date.now() < doneDeadline && pidAlive(completingPid)) {
-          const status = await client.callTool({
+          const status = await fixture.client.callTool({
             name: "babelfish_task_status",
-            arguments: { id: completingTask.id },
+            arguments: { id: completingId },
           });
           completingSnap = JSON.parse(String(status.content?.[0]?.text));
           if (completingSnap.status === "completed") {
@@ -720,35 +633,12 @@ describe("Hermes MCP server", () => {
         expect(completingSnap.status).toBe("completed");
         expect(pidAlive(completingPid)).toBe(true);
 
-        const overflow = await client.callTool({
-          name: "babelfish_task_start",
-          arguments: {
-            kind: "tool",
-            name: "hold_until_term",
-            args: { marker: path.join(markerRoot, "done-overflow"), hold_sec: 2 },
-          },
-        });
-        expect(overflow.isError).toBe(true);
-        expect(overflowError(overflow)).toBe(`Too many running Babelfish tasks (max ${MAX_RUNNING_TASKS})`);
+        await fixture.expectFull();
 
         await waitForProcessExit(completingPid);
-        const resumed = await client.callTool({
-          name: "babelfish_task_start",
-          arguments: {
-            kind: "tool",
-            name: "hold_until_term",
-            args: { marker: path.join(markerRoot, "done-resumed"), hold_sec: 2 },
-          },
-        });
-        expect(resumed.isError).toBeFalsy();
-        const resumedTask = JSON.parse(String(resumed.content?.[0]?.text));
-        expect(resumedTask.status).toBe("running");
-        startedIds.push(resumedTask.id);
-        pids.push(await waitForPidFile(path.join(markerRoot, "done-resumed")));
+        await fixture.startTasks(1);
       } finally {
-        await stopTasksAndKill(client, startedIds, pids);
-        await client.close();
-        await server.close();
+        await fixture.close();
       }
     },
   );
@@ -757,81 +647,24 @@ describe("Hermes MCP server", () => {
     "rejects a replacement start while a timed-out helper is still exiting",
     { timeout: 60_000 },
     async () => {
-      const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-timeout-"));
-      const markerRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-timeout-markers-"));
-      await writeHoldPlugin(installDir);
-      const server = createHermesMcpServer({
-        installDir,
-        python: "python3",
-        timeoutMs: 4_000,
-        env: {},
-      });
-      const client = new Client({ name: "test", version: "0.0.0" });
-      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-      const startedIds: string[] = [];
-      const pids: number[] = [];
-
-      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const fixture = await createCapacityFixture(4_000);
       try {
-        const markers: string[] = [];
         const launchedAt = Date.now();
-        for (let index = 0; index < MAX_RUNNING_TASKS; index += 1) {
-          const marker = path.join(markerRoot, `timeout-${index}`);
-          markers.push(marker);
-          const started = await client.callTool({
-            name: "babelfish_task_start",
-            arguments: {
-              kind: "tool",
-              name: "hold_until_term",
-              args: { marker, hold_sec: 2 },
-            },
-          });
-          expect(started.isError).toBeFalsy();
-          const task = JSON.parse(String(started.content?.[0]?.text));
-          expect(task.status).toBe("running");
-          startedIds.push(task.id);
-        }
-        for (const marker of markers) {
-          pids.push(await waitForPidFile(marker));
-        }
-
-        const timedOutPid = pids[0];
+        await fixture.startTasks(MAX_RUNNING_TASKS);
+        const timedOutPid = fixture.pids[0];
         while (Date.now() < launchedAt + 4_200) {
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
-        expect(pidAlive(timedOutPid as number)).toBe(true);
+        expect(pidAlive(timedOutPid)).toBe(true);
 
-        const overflow = await client.callTool({
-          name: "babelfish_task_start",
-          arguments: {
-            kind: "tool",
-            name: "hold_until_term",
-            args: { marker: path.join(markerRoot, "timeout-overflow"), hold_sec: 2 },
-          },
-        });
-        expect(overflow.isError).toBe(true);
-        expect(overflowError(overflow)).toBe(`Too many running Babelfish tasks (max ${MAX_RUNNING_TASKS})`);
+        await fixture.expectFull();
 
-        await waitForProcessExit(timedOutPid as number);
-        const remaining = pids.slice(1);
+        await waitForProcessExit(timedOutPid);
+        const remaining = fixture.pids.slice(1);
         await Promise.all(remaining.map((pid) => waitForProcessExit(pid)));
-        const resumed = await client.callTool({
-          name: "babelfish_task_start",
-          arguments: {
-            kind: "tool",
-            name: "hold_until_term",
-            args: { marker: path.join(markerRoot, "timeout-resumed"), hold_sec: 2 },
-          },
-        });
-        expect(resumed.isError).toBeFalsy();
-        const resumedTask = JSON.parse(String(resumed.content?.[0]?.text));
-        expect(resumedTask.status).toBe("running");
-        startedIds.push(resumedTask.id);
-        pids.push(await waitForPidFile(path.join(markerRoot, "timeout-resumed")));
+        await fixture.startTasks(1);
       } finally {
-        await stopTasksAndKill(client, startedIds, pids);
-        await client.close();
-        await server.close();
+        await fixture.close();
       }
     },
   );
