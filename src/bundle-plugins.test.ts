@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { tempDir } from "../test/temp-dir.js";
 import {
   hookAdditionalContext,
   hookBlock,
@@ -23,7 +24,7 @@ function hookPayloadWithByteSize(bytes: number): Record<string, unknown> {
 }
 
 async function fixture(app: "claude-code" | "codex") {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), `babelfish-${app}-`));
+  const root = await tempDir(`babelfish-${app}-`);
   const manifestDir = app === "codex" ? ".codex-plugin" : ".claude-plugin";
   await fs.mkdir(path.join(root, manifestDir), { recursive: true });
   await fs.writeFile(
@@ -47,25 +48,17 @@ async function fixture(app: "claude-code" | "codex") {
 describe("bundle plugins", () => {
   it.each(["claude-code", "codex"] as const)("accepts %s skill directories beginning with two dots", async (app) => {
     const root = await fixture(app);
-    try {
-      await fs.rename(path.join(root, "skills"), path.join(root, "..skills"));
-      const manifestDir = app === "codex" ? ".codex-plugin" : ".claude-plugin";
-      await fs.writeFile(path.join(root, manifestDir, "plugin.json"), JSON.stringify({ skills: "./..skills" }));
-      const plugin = await inspectBundlePlugin(app, root);
-      expect(plugin.skillDirs).toEqual([await fs.realpath(path.join(root, "..skills"))]);
-    } finally {
-      await fs.rm(root, { recursive: true, force: true });
-    }
+    await fs.rename(path.join(root, "skills"), path.join(root, "..skills"));
+    const manifestDir = app === "codex" ? ".codex-plugin" : ".claude-plugin";
+    await fs.writeFile(path.join(root, manifestDir, "plugin.json"), JSON.stringify({ skills: "./..skills" }));
+    const plugin = await inspectBundlePlugin(app, root);
+    expect(plugin.skillDirs).toEqual([await fs.realpath(path.join(root, "..skills"))]);
   });
 
   it.each(["..", "../outside"])("rejects a skill root outside the plugin: %s", async (skills) => {
     const root = await fixture("codex");
-    try {
-      await fs.writeFile(path.join(root, ".codex-plugin", "plugin.json"), JSON.stringify({ skills }));
-      await expect(inspectBundlePlugin("codex", root)).rejects.toThrow("Plugin path escapes its root");
-    } finally {
-      await fs.rm(root, { recursive: true, force: true });
-    }
+    await fs.writeFile(path.join(root, ".codex-plugin", "plugin.json"), JSON.stringify({ skills }));
+    await expect(inspectBundlePlugin("codex", root)).rejects.toThrow("Plugin path escapes its root");
   });
 
   it.each(["claude-code", "codex"] as const)("discovers %s skills and command hooks", async (app) => {
@@ -94,7 +87,7 @@ describe("bundle plugins", () => {
   });
 
   it("executes argv command hooks without a shell", async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const rootDir = await tempDir("babelfish-root-");
     const pluginRoot = path.join(rootDir, "codex", "fixture");
     await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
     await fs.writeFile(
@@ -122,7 +115,7 @@ describe("bundle plugins", () => {
   }, 30_000);
 
   it("executes compatible command hooks", async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const rootDir = await tempDir("babelfish-root-");
     const plugin = await fixture("codex");
     await fs.mkdir(path.join(rootDir, "codex"), { recursive: true });
     await fs.rename(plugin, path.join(rootDir, "codex", "fixture"));
@@ -135,7 +128,7 @@ describe("bundle plugins", () => {
   }, 30_000);
 
   it("terminates hooks that exceed the output limit", async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const rootDir = await tempDir("babelfish-root-");
     const pluginRoot = path.join(rootDir, "codex", "fixture");
     await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
     await fs.writeFile(
@@ -167,7 +160,7 @@ describe("bundle plugins", () => {
   });
 
   it("rejects hooks whose stdin payload exceeds 1 MiB", async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const rootDir = await tempDir("babelfish-root-");
     const pluginRoot = path.join(rootDir, "codex", "fixture");
     const marker = path.join(pluginRoot, "ran.txt");
     await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
@@ -201,7 +194,7 @@ describe("bundle plugins", () => {
   });
 
   it("runs hooks whose stdin payload is exactly 1 MiB", async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const rootDir = await tempDir("babelfish-root-");
     const pluginRoot = path.join(rootDir, "codex", "fixture");
     await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
     await fs.writeFile(
@@ -231,7 +224,7 @@ describe("bundle plugins", () => {
   it.each(["PreToolUse", "UserPromptSubmit", "Stop"] as const)(
     "blocks %s when stdin exceeds 1 MiB instead of skipping the decision",
     async (event) => {
-      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+      const rootDir = await tempDir("babelfish-root-");
       const pluginRoot = path.join(rootDir, "codex", "fixture");
       const marker = path.join(pluginRoot, "ran.txt");
       await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
@@ -581,7 +574,7 @@ process.exitCode = ${code};
   }, 30_000);
 
   it("passes each pre-tool rewrite to subsequent hooks", async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const rootDir = await tempDir("babelfish-root-");
     const pluginRoot = path.join(rootDir, "codex", "fixture");
     await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
     await fs.writeFile(
@@ -607,7 +600,7 @@ process.exitCode = ${code};
   });
 
   it("evaluates prompt hook handlers through the host callback", async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const rootDir = await tempDir("babelfish-root-");
     const pluginRoot = path.join(rootDir, "claude-code", "fixture");
     await fs.mkdir(path.join(pluginRoot, ".claude-plugin"), { recursive: true });
     await fs.writeFile(
@@ -778,14 +771,14 @@ process.exitCode = ${code};
 
   it("rejects skill roots that escape through symlinks", async () => {
     const root = await fixture("codex");
-    const outside = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-outside-"));
+    const outside = await tempDir("babelfish-outside-");
     await fs.rm(path.join(root, "skills"), { recursive: true });
     await fs.symlink(outside, path.join(root, "skills"));
     await expect(inspectBundlePlugin("codex", root)).rejects.toThrow(/symlink/);
   });
 
   it("treats status 2 as a block and successful text output as a no-op", async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
+    const rootDir = await tempDir("babelfish-root-");
     const pluginRoot = path.join(rootDir, "codex", "fixture");
     await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
     await fs.writeFile(
@@ -820,7 +813,7 @@ process.exitCode = ${code};
   }, 30_000); // Four Windows supervisor launches can exceed Vitest's default deadline.
 
   it("counts conventional hooks.json once when the declared hooks directory also contains it", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-conventional-"));
+    const root = await tempDir("babelfish-hooks-conventional-");
     const hooksDir = path.join(root, "hooks");
     await fs.mkdir(path.join(root, ".claude-plugin"), { recursive: true });
     await fs.mkdir(hooksDir, { recursive: true });
@@ -841,7 +834,7 @@ process.exitCode = ${code};
   });
 
   it("counts unique JSON hook files at and above the Codex directory limit", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-overlap-"));
+    const root = await tempDir("babelfish-hooks-overlap-");
     const hooksDir = path.join(root, "hooks");
     await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
     await fs.mkdir(hooksDir, { recursive: true });
@@ -868,7 +861,7 @@ process.exitCode = ${code};
   });
 
   it("shares the 50-file cap across declared hook directories", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-shared-"));
+    const root = await tempDir("babelfish-hooks-shared-");
     const firstDir = path.join(root, "hooks-a");
     const secondDir = path.join(root, "hooks-b");
     await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
@@ -896,7 +889,7 @@ process.exitCode = ${code};
   });
 
   it("rejects a hook directory deeper than 8 levels", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-depth-"));
+    const root = await tempDir("babelfish-hooks-depth-");
     const segments = Array.from({ length: MAX_HOOK_WALK_DEPTH + 1 }, (_, index) => `d${index}`);
     const deepDir = path.join(root, "hooks", ...segments);
     await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
@@ -915,7 +908,7 @@ process.exitCode = ${code};
   });
 
   it("loads a hook file at the 8-directory depth cap", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-hooks-depth-ok-"));
+    const root = await tempDir("babelfish-hooks-depth-ok-");
     const segments = Array.from({ length: MAX_HOOK_WALK_DEPTH }, (_, index) => `d${index}`);
     const deepDir = path.join(root, "hooks", ...segments);
     await fs.mkdir(path.join(root, ".codex-plugin"), { recursive: true });
@@ -996,25 +989,15 @@ await server.connect(new StdioServerTransport());
 }
 
 describe("inspectBundleServer tools/list pagination", () => {
-  const roots: string[] = [];
-  async function pagerRoot(): Promise<string> {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-pager-"));
-    roots.push(root);
-    return root;
-  }
-  afterEach(async () => {
-    await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
-  });
-
   it("collects tools across a finite cursor page", async () => {
-    const root = await pagerRoot();
+    const root = await tempDir("babelfish-pager-");
     const server = await writePagerServer(root, "two-page");
     const inspection = await inspectBundleServer(bundlePlugin(root), server, 10_000);
     expect(inspection.tools.map((tool) => tool.name)).toEqual(["alpha", "beta"]);
   }, 15_000);
 
   it("accepts a listing ending on the fiftieth page", async () => {
-    const root = await pagerRoot();
+    const root = await tempDir("babelfish-pager-");
     const server = await writePagerServer(root, "fifty-page");
     const inspection = await inspectBundleServer(bundlePlugin(root), server, 10_000);
     expect(inspection.tools).toHaveLength(50);
@@ -1022,7 +1005,7 @@ describe("inspectBundleServer tools/list pagination", () => {
   }, 15_000);
 
   it("rejects a repeated tools/list cursor", { timeout: 8_000 }, async () => {
-    const root = await pagerRoot();
+    const root = await tempDir("babelfish-pager-");
     const server = await writePagerServer(root, "repeat");
     await expect(inspectBundleServer(bundlePlugin(root), server, 10_000)).rejects.toThrow(
       /repeated cursor/i,
@@ -1030,7 +1013,7 @@ describe("inspectBundleServer tools/list pagination", () => {
   });
 
   it("caps tools/list pagination before a unique-cursor loop can grow", { timeout: 8_000 }, async () => {
-    const root = await pagerRoot();
+    const root = await tempDir("babelfish-pager-");
     const server = await writePagerServer(root, "increment");
     await expect(inspectBundleServer(bundlePlugin(root), server, 10_000)).rejects.toThrow(
       /50 pages/i,
@@ -1038,7 +1021,7 @@ describe("inspectBundleServer tools/list pagination", () => {
   });
 
   it("shares one deadline across tools/list pages", { timeout: 8_000 }, async () => {
-    const root = await pagerRoot();
+    const root = await tempDir("babelfish-pager-");
     const server = await writePagerServer(root, "slow-increment");
     await expect(inspectBundleServer(bundlePlugin(root), server, 1_000)).rejects.toThrow(
       /timed out/i,

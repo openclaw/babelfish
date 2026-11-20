@@ -53,6 +53,7 @@ type OpenClawCliProgram = {
   command(name: string): OpenClawCliCommand;
 };
 type OpenClawApi = {
+  registrationMode?: string;
   config?: {
     plugins?: {
       entries?: Record<string, {
@@ -117,7 +118,7 @@ const UNSUPPORTED_WARNING_MIDDLEWARE = new Set([
   "tool_execution",
 ]);
 
-const config = resolveConfig(undefined);
+const config = resolveConfig();
 const sessionStartContext = new Map<string, string[]>();
 const sessionStartPending = new Map<string, Promise<void>>();
 const sessionStartOwners = new Map<string, symbol>();
@@ -439,7 +440,7 @@ function registerToolHooks(api: OpenClawApi): void {
     async (event, ctx) => {
       const hook = await invokeHook("transform_tool_result", {
         ...event,
-        result: text(event.result),
+        result: stringifyResult(event.result),
         task_id: sessionKey(event, ctx) ?? "",
       }, ctx);
       const replacement = hook.results.find((value): value is string => typeof value === "string");
@@ -801,12 +802,14 @@ export default {
   name: "Babelfish",
   description: "Use plugins from supported coding and agent apps in OpenClaw.",
   register(api: OpenClawApi): void {
+    registerBabelfishCli(api);
+    registerHermesCliCommands(api);
+    if (api.registrationMode === "cli-metadata") return;
+
     configurePromptHooks(api);
     registerNativeTools(api);
-    registerBabelfishCli(api);
     registerHermesCommands(api);
     registerOutputStyles(api);
-    registerHermesCliCommands(api);
     registerWarnings(api);
     registerToolHooks(api);
     registerRunHooks(api);

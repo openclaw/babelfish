@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
+
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.
 
 - Update the Vitest test runner to 5.1.1.
@@ -22,6 +24,7 @@
 
 - Allow Python cold starts in the observer-result test on slower CI runners while retaining dedicated timeout coverage.
 - Update the pinned CodeQL actions to 4.39.0 for repository security scanning. Thanks @dependabot.
+- Register Babelfish management and imported CLI commands during OpenClaw metadata discovery so the host can invoke them before runtime activation.
 - Run macOS CI on the Apple Silicon Xcode 27 image while retaining Node.js 22.19 support.
 
 - Pass Hermes tool-result hooks the serialized result and session identifier, honor empty replacements, and warn when a plugin requests the terminal-only output hook.

@@ -104,6 +104,8 @@ export OPENCLAW_BABELFISH_HERMES_PYTHON=/path/to/python3
 export OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS=120000
 ```
 
+Hermes deadlines above the maximum Node timer of 2,147,483,647 ms use the default 120 seconds.
+
 Compatible lifecycle, tool, message, run, subagent, and middleware callbacks map to their matching OpenClaw hooks. Unmatched approval, kanban, execution, LLM request, and output-transform callbacks produce startup warnings.
 
 ## Example plugins
