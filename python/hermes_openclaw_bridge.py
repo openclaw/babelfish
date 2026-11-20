@@ -465,21 +465,13 @@ def _invoke(handler: Callable[..., Any], arg: Any) -> Any:
             inspect.Parameter.VAR_POSITIONAL,
         }
     ]
-    stdout = io.StringIO()
-    with contextlib.redirect_stdout(stdout):
-        result = handler(arg) if positional else handler()
-        if inspect.isawaitable(result):
-            result = asyncio.run(result)
-    printed = stdout.getvalue()
-    if printed:
-        print(printed, file=sys.stderr, end="")
-    return result
+    return _run_handler(handler, arg) if positional else _run_handler(handler)
 
 
-def _invoke_kwargs(handler: Callable[..., Any], kwargs: dict[str, Any]) -> Any:
+def _run_handler(handler: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
     stdout = io.StringIO()
     with contextlib.redirect_stdout(stdout):
-        result = handler(**kwargs)
+        result = handler(*args, **kwargs)
         if inspect.isawaitable(result):
             result = asyncio.run(result)
     printed = stdout.getvalue()
@@ -491,7 +483,7 @@ def _invoke_kwargs(handler: Callable[..., Any], kwargs: dict[str, Any]) -> Any:
 def _invoke_event_callback(handler: Callable[..., Any], kwargs: dict[str, Any]) -> Any:
     params = list(inspect.signature(handler).parameters.values())
     if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params):
-        return _invoke_kwargs(handler, kwargs)
+        return _run_handler(handler, **kwargs)
 
     keyword_names = {
         param.name
@@ -515,11 +507,9 @@ def _invoke_event_callback(handler: Callable[..., Any], kwargs: dict[str, Any]) 
         }
         and param.name not in filtered
     ]
-    if not params or not missing_required:
-        return _invoke_kwargs(handler, filtered)
     if len(params) == 1 and len(missing_required) == 1:
         return _invoke(handler, kwargs)
-    return _invoke_kwargs(handler, filtered)
+    return _run_handler(handler, **filtered)
 
 
 def _call(payload: dict[str, Any]) -> dict[str, Any]:
@@ -676,14 +666,19 @@ def _skill(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _hook(payload: dict[str, Any]) -> dict[str, Any]:
-    hook_name = str(payload["hook"])
+def _event_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
     kwargs = payload.get("kwargs")
     if not isinstance(kwargs, dict):
         kwargs = {}
     context = payload.get("context")
     if isinstance(context, dict):
-        kwargs = {**context, **kwargs, "openclaw_context": context}
+        return {**context, **kwargs, "openclaw_context": context}
+    return kwargs
+
+
+def _hook(payload: dict[str, Any]) -> dict[str, Any]:
+    hook_name = str(payload["hook"])
+    kwargs = _event_kwargs(payload)
 
     results: list[Any] = []
     invoked: list[dict[str, str]] = []
@@ -707,12 +702,7 @@ def _hook(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _middleware(payload: dict[str, Any]) -> dict[str, Any]:
     kind = str(payload["kind"])
-    kwargs = payload.get("kwargs")
-    if not isinstance(kwargs, dict):
-        kwargs = {}
-    context = payload.get("context")
-    if isinstance(context, dict):
-        kwargs = {**context, **kwargs, "openclaw_context": context}
+    kwargs = _event_kwargs(payload)
 
     results: list[Any] = []
     invoked: list[dict[str, str]] = []
