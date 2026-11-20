@@ -171,10 +171,7 @@ class BridgeProcess {
   }
 
   request<T>(request: BridgeRequest, options: { signal?: AbortSignal }): Promise<T> {
-    const result = this.queue.then(
-      () => this.execute<T>(request, options),
-      () => this.execute<T>(request, options),
-    );
+    const result = this.queue.then(() => this.execute<T>(request, options));
     this.queue = result.then(
       () => undefined,
       () => undefined,
@@ -227,16 +224,9 @@ class BridgeProcess {
       env: { ...process.env, ...this.config.env },
       stdio: ["pipe", "pipe", "pipe"],
     });
-    let exitSettled = false;
     let settleExit!: () => void;
     this.childExit = new Promise<void>((resolve) => {
-      settleExit = () => {
-        if (exitSettled) {
-          return;
-        }
-        exitSettled = true;
-        resolve();
-      };
+      settleExit = resolve;
     });
     child.unref();
     (child.stdin as unknown as UnrefHandle).unref();
@@ -318,7 +308,7 @@ function requestLane(request: BridgeRequest): string {
   if (!("context" in request) || !request.context) {
     return "global";
   }
-  return request.context.sessionKey ?? request.context.sessionId ?? request.context.agentId ?? "global";
+  return contextLane(request.context) ?? "global";
 }
 
 function contextLane(context: HermesRuntimeContext): string | undefined {
@@ -341,19 +331,13 @@ function runHelper<T>(
     const bridge = new BridgeProcess(config);
     if (options.waitForExit) {
       const result = bridge.request<T>(request, options);
-      const occupancy = result
-        .then(
-          () => undefined,
-          () => undefined,
-        )
-        .finally(async () => {
-          bridge.reset();
-          await bridge.waitForExit();
-        })
-        .then(
-          () => undefined,
-          () => undefined,
-        );
+      const occupancy = result.finally(() => {
+        bridge.reset();
+        return bridge.waitForExit();
+      }).then(
+        () => undefined,
+        () => undefined,
+      );
       options.onOccupancy?.(occupancy);
       return result;
     }
