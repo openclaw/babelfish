@@ -23,6 +23,23 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
+it("lists one app or all apps in discovery order", async () => {
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    const codex = { app: "codex", plugins: [] };
+    await runBabelfishCli(["list", "codex"]);
+    expect(JSON.parse(log.mock.lastCall![0])).toEqual(codex);
+    await runBabelfishCli(["list"]);
+    expect(JSON.parse(log.mock.lastCall![0])).toEqual({ apps: [
+      { app: "hermes", installDir: path.join(root, "hermes"), plugins: [] },
+      { app: "claude-code", plugins: [] },
+      codex,
+    ] });
+  } finally {
+    log.mockRestore();
+  }
+});
+
 describe("babelfish install clone timeout", () => {
   it.each([
     ["--clone-timeout-ms"],

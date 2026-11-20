@@ -4,6 +4,8 @@
 
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
+- Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.
+
 - Refresh Vitest to 5.1.0 and CodeQL to 4.39.3, and patch transitive Hono vulnerabilities while retaining Node.js 22.19 support. Thanks @dependabot! #64 #65
 
 - Refresh the MCP SDK and Node typings, and patch transitive body-parser, fast-uri, ip-address, qs, and Zod vulnerabilities while preserving Node.js 22.19 support. Thanks @dependabot! #59 #60
@@ -11,6 +13,8 @@
 - Allow Vincent's Git signing key for release tags and record the actual verified tag signer while preserving immutable tag and package proof bindings.
 
 - Keep full weekly CodeQL analysis without duplicate main-push scans, protect scheduled/manual runs, and analyze ready-for-review and checkout-attribute PR changes.
+
+- Warm the low-memory image with a production install and run the full package-consumer proof once under the 1 GiB limit.
 
 - Allow Python cold starts in the observer-result test on slower CI runners while retaining dedicated timeout coverage.
 - Update the pinned CodeQL actions to 4.39.0 for repository security scanning. Thanks @dependabot.

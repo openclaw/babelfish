@@ -68,4 +68,9 @@ jobs:
         run: npm run check
 
       - name: Verify package contents
-        run: npm run pack:check
+        shell: bash
+        run: |
+          # Keep the consumer install isolated while reusing setup-node's npm downloads.
+          BABELFISH_CONSUMER_CACHE="$(npm config get cache | tr -d '\r')"
+          export BABELFISH_CONSUMER_CACHE
+          npm run pack:check
