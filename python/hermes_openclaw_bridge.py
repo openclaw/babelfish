@@ -23,7 +23,7 @@ import sys
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 
 
 _PLUGIN_CACHE: dict[str, tuple[dict[str, Any], "RecordingContext"]] = {}
@@ -522,25 +522,33 @@ def _invoke_event_callback(handler: Callable[..., Any], kwargs: dict[str, Any]) 
     return _invoke_kwargs(handler, filtered)
 
 
-def _call(payload: dict[str, Any]) -> dict[str, Any]:
-    wanted_plugin = payload.get("plugin")
-    wanted_tool = str(payload["tool"])
-    matches: list[tuple[Path, ToolRecord]] = []
+Registration = TypeVar("Registration", ToolRecord, CommandRecord, CliCommandRecord, SkillRecord)
 
+
+def _find_registration(
+    payload: dict[str, Any],
+    name: str,
+    label: str,
+    registrations: Callable[[RecordingContext], list[Registration]],
+) -> tuple[Path, Registration]:
+    wanted_plugin = payload.get("plugin")
     install_dir = Path(str(payload["installDir"])).expanduser().resolve()
+    matches = []
     for plugin_dir in _matching_plugin_dirs(install_dir, wanted_plugin):
         _manifest, ctx = _load_plugin(plugin_dir)
-        for tool in ctx.tools:
-            if tool.name == wanted_tool:
-                matches.append((plugin_dir, tool))
+        matches.extend((plugin_dir, entry) for entry in registrations(ctx) if entry.name == name)
 
     if not matches:
-        raise RuntimeError(f"Plugin tool not found: {wanted_tool}")
+        raise RuntimeError(f"Plugin {label} not found: {name}")
     if len(matches) > 1 and not wanted_plugin:
-        names = ", ".join(plugin_dir.name for plugin_dir, _tool in matches)
-        raise RuntimeError(f"Plugin tool '{wanted_tool}' is ambiguous. Specify plugin. Matches: {names}")
+        names = ", ".join(plugin_dir.name for plugin_dir, _ in matches)
+        raise RuntimeError(f"Plugin {label} '{name}' is ambiguous. Specify plugin. Matches: {names}")
+    return matches[0]
 
-    plugin_dir, tool = matches[0]
+
+def _call(payload: dict[str, Any]) -> dict[str, Any]:
+    wanted_tool = str(payload["tool"])
+    plugin_dir, tool = _find_registration(payload, wanted_tool, "tool", lambda ctx: ctx.tools)
     if not tool.available():
         raise RuntimeError(f"Plugin tool '{wanted_tool}' is unavailable; check required env or check_fn.")
 
@@ -563,24 +571,8 @@ def _call(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _command(payload: dict[str, Any]) -> dict[str, Any]:
-    wanted_plugin = payload.get("plugin")
     wanted_command = str(payload["command"]).lstrip("/")
-    matches: list[tuple[Path, CommandRecord]] = []
-
-    install_dir = Path(str(payload["installDir"])).expanduser().resolve()
-    for plugin_dir in _matching_plugin_dirs(install_dir, wanted_plugin):
-        _manifest, ctx = _load_plugin(plugin_dir)
-        for command in ctx.commands:
-            if command.name == wanted_command:
-                matches.append((plugin_dir, command))
-
-    if not matches:
-        raise RuntimeError(f"Plugin command not found: {wanted_command}")
-    if len(matches) > 1 and not wanted_plugin:
-        names = ", ".join(plugin_dir.name for plugin_dir, _command in matches)
-        raise RuntimeError(f"Plugin command '{wanted_command}' is ambiguous. Specify plugin. Matches: {names}")
-
-    plugin_dir, command = matches[0]
+    plugin_dir, command = _find_registration(payload, wanted_command, "command", lambda ctx: ctx.commands)
     if command.handler is None:
         raise RuntimeError(f"Plugin command '{wanted_command}' has no callable handler.")
 
@@ -596,24 +588,8 @@ def _cli_command(payload: dict[str, Any]) -> dict[str, Any]:
     import argparse
     import shlex
 
-    wanted_plugin = payload.get("plugin")
     wanted_command = str(payload["command"]).lstrip("/")
-    matches: list[tuple[Path, CliCommandRecord]] = []
-
-    install_dir = Path(str(payload["installDir"])).expanduser().resolve()
-    for plugin_dir in _matching_plugin_dirs(install_dir, wanted_plugin):
-        _manifest, ctx = _load_plugin(plugin_dir)
-        for command in ctx.cli_commands:
-            if command.name == wanted_command:
-                matches.append((plugin_dir, command))
-
-    if not matches:
-        raise RuntimeError(f"Plugin CLI command not found: {wanted_command}")
-    if len(matches) > 1 and not wanted_plugin:
-        names = ", ".join(plugin_dir.name for plugin_dir, _command in matches)
-        raise RuntimeError(f"Plugin CLI command '{wanted_command}' is ambiguous. Specify plugin. Matches: {names}")
-
-    plugin_dir, command = matches[0]
+    plugin_dir, command = _find_registration(payload, wanted_command, "CLI command", lambda ctx: ctx.cli_commands)
     raw_args = payload.get("args", [])
     argv = raw_args if isinstance(raw_args, list) else shlex.split(str(raw_args))
 
@@ -650,24 +626,8 @@ def _cli_command(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _skill(payload: dict[str, Any]) -> dict[str, Any]:
-    wanted_plugin = payload.get("plugin")
     wanted_skill = str(payload["skill"])
-    matches: list[tuple[Path, SkillRecord]] = []
-
-    install_dir = Path(str(payload["installDir"])).expanduser().resolve()
-    for plugin_dir in _matching_plugin_dirs(install_dir, wanted_plugin):
-        _manifest, ctx = _load_plugin(plugin_dir)
-        for skill in ctx.skills:
-            if skill.name == wanted_skill:
-                matches.append((plugin_dir, skill))
-
-    if not matches:
-        raise RuntimeError(f"Plugin skill not found: {wanted_skill}")
-    if len(matches) > 1 and not wanted_plugin:
-        names = ", ".join(plugin_dir.name for plugin_dir, _skill in matches)
-        raise RuntimeError(f"Plugin skill '{wanted_skill}' is ambiguous. Specify plugin. Matches: {names}")
-
-    plugin_dir, skill = matches[0]
+    plugin_dir, skill = _find_registration(payload, wanted_skill, "skill", lambda ctx: ctx.skills)
     return {
         "plugin": plugin_dir.name,
         "skill": skill.name,

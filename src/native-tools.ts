@@ -2,13 +2,12 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SUPPORTED_APPS, type BabelfishConfig, type SupportedApp } from "./config.js";
+import { isSupportedApp, requireApp, SUPPORTED_APPS, type BabelfishConfig, type SupportedApp } from "./config.js";
 import {
   callBundleMcp,
   callBundleTool,
   inspectBundleServer,
   listBundlePlugins,
-  summarizeBundlePlugin,
   type BundlePlugin,
 } from "./bundle-plugins.js";
 import {
@@ -19,6 +18,7 @@ import {
   type HermesRuntimeContext,
   type HermesToolSummary,
 } from "./hermes-python.js";
+import { listInstalledPlugins } from "./plugin-inventory.js";
 import { syncHermesSkills } from "./skill-sync.js";
 import { readFrontmatterScalar, splitFrontmatter } from "./markdown.js";
 
@@ -129,17 +129,6 @@ function skillSlug(value: string): string {
 
 function stringifyResult(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2);
-}
-
-function supportedApp(value: unknown): SupportedApp {
-  if (value === "hermes" || value === "claude-code" || value === "codex") {
-    return value;
-  }
-  throw new Error(`Unsupported app: ${String(value || "(missing)")}`);
-}
-
-function isSupportedApp(value: unknown): value is SupportedApp {
-  return SUPPORTED_APPS.includes(value as SupportedApp);
 }
 
 function result(value: unknown): { content: Array<{ type: "text"; text: string }>; details: unknown } {
@@ -699,21 +688,8 @@ function bridgeTools(config: BabelfishConfig): NativeTool[] {
       },
       execute: async (_toolCallId, params) => {
         const rawApp = asObject(params)?.app;
-        if (rawApp !== undefined) {
-          const app = supportedApp(rawApp);
-          return result(
-            app === "hermes"
-              ? { app, ...(await listHermesPlugins(config)) }
-              : { app, plugins: (await listBundlePlugins(config, app)).map(summarizeBundlePlugin) },
-          );
-        }
-        return result({
-          apps: [
-            { app: "hermes", ...(await listHermesPlugins(config)) },
-            { app: "claude-code", plugins: (await listBundlePlugins(config, "claude-code")).map(summarizeBundlePlugin) },
-            { app: "codex", plugins: (await listBundlePlugins(config, "codex")).map(summarizeBundlePlugin) },
-          ],
-        });
+        const app = rawApp === undefined ? undefined : requireApp(rawApp);
+        return result(await listInstalledPlugins(config, app));
       },
     },
   ];
