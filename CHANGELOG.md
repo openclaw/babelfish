@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Check the package on Node.js 26 in Linux CI and honor the selected npm cache during offline consumer validation.
+
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.

@@ -25,21 +25,21 @@ if (process.argv[2] !== "--worker") {
   await fs.writeFile(config, "");
   const globalConfig = path.join(root, "empty-global.npmrc");
   await fs.writeFile(globalConfig, "");
+  const offline = process.env.BABELFISH_CONSUMER_OFFLINE === "1";
+  const defaultCache = offline ? process.env.npm_config_cache || path.join(os.homedir(), ".npm") : path.join(root, "cache");
   const env = Object.fromEntries(["PATH", "SystemRoot", "ComSpec", "PATHEXT", "WINDIR", "NODE_OPTIONS"].flatMap((key) => process.env[key] ? [[key, process.env[key]]] : []));
   Object.assign(env, {
     HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
     TMPDIR: root, TMP: root, TEMP: root, XDG_CONFIG_HOME: home, XDG_STATE_HOME: home,
     npm_config_userconfig: config, npm_config_globalconfig: globalConfig,
-    npm_config_cache: process.env.BABELFISH_CONSUMER_CACHE || path.join(root, "cache"), npm_config_registry: "https://registry.npmjs.org/",
+    npm_config_cache: process.env.BABELFISH_CONSUMER_CACHE || defaultCache, npm_config_registry: "https://registry.npmjs.org/",
     GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: config,
     OPENCLAW_BABELFISH_ROOT: path.join(root, "state"),
     OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR: path.join(root, "state", "hermes"),
     OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS: "15000",
   });
-  const offline = process.env.BABELFISH_CONSUMER_OFFLINE === "1";
   if (offline) {
     env.npm_config_offline = "true";
-    env.npm_config_cache = process.env.npm_config_cache || path.join(os.homedir(), ".npm");
   }
   const run = (command, args, cwd, timeout = 120_000) => execFileSync(command, args, { cwd, env, encoding: "utf8", timeout, maxBuffer: 4 * 1024 * 1024, shell: process.platform === "win32" && command.endsWith(".cmd") });
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
