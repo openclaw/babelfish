@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildNativeToolEntries, createNativeTools, normalizeMcpContent, regenerateNativeTools } from "./native-tools.js";
+import { buildNativeToolEntries, createNativeTools, normalizeMcpContent, readGeneratedNativeToolRegistry, regenerateNativeTools } from "./native-tools.js";
 
 const fixtureTimeoutMs = 15_000;
 
@@ -263,6 +263,24 @@ await server.connect(new StdioServerTransport());
       expect(registry.cliCommands.map((entry: { name: string }) => entry.name)).toEqual([
         "babelfish_client_babelfish", "babelfish_client_status",
       ]);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("applies the same defaults to missing and partial registries", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-registry-"));
+    const target = path.join(root, "babelfish.generated.json");
+    try {
+      const empty = readGeneratedNativeToolRegistry(root);
+      expect(empty).toEqual({
+        generatedAt: "", installDir: "", skillDirs: [], unsupported: [],
+        tools: [], commands: [], cliCommands: [], outputStyles: [],
+      });
+      await fs.writeFile(target, JSON.stringify({ skillDirs: ["skills", false], tools: {}, commands: [null] }));
+      expect(readGeneratedNativeToolRegistry(root)).toEqual({ ...empty, skillDirs: ["skills"] });
+      await fs.writeFile(target, "{");
+      expect(() => readGeneratedNativeToolRegistry(root)).toThrow(SyntaxError);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
