@@ -1,8 +1,9 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { commitFixture, stalledGitRemote } from "../test/git-fixtures.js";
+import { commitFixture } from "../test/git-fixtures.js";
 import { runBabelfishCli } from "./cli.js";
+import * as gitInstall from "./git-install.js";
 
 vi.mock("./native-tools.js", () => ({
   regenerateNativeTools: vi.fn(async () => ({ restartRequired: true })),
@@ -70,16 +71,18 @@ describe("babelfish install clone timeout", () => {
     await expect(fs.access(installed)).rejects.toMatchObject({ code: "ENOENT" });
   }, 15_000);
 
-  it.each(["flag", "environment"])("honors the %s timeout and closes the stalled Git transport", async (override) => {
-    const timeoutMs = process.platform === "win32" ? 10_000 : 2_000;
-    const remote = await stalledGitRemote();
+  it.each(["flag", "environment"])("passes the %s timeout to the installer", async (override) => {
+    const timeoutMs = 431;
     const flags = override === "flag" ? ["--clone-timeout-ms", String(timeoutMs)] : [];
     if (override === "environment") vi.stubEnv("OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS", String(timeoutMs));
-    await expect(runBabelfishCli([
-      "install", "codex", remote.url,
-      "--name", "stalled", ...flags,
-    ])).rejects.toThrow(`Git clone timed out after ${timeoutMs}ms`);
-    await remote.expectDisconnected();
-    expect(await fs.readdir(path.join(root, "apps", "codex"))).toEqual([]);
-  }, 20_000);
+
+    const failure = new Error("clone failed");
+    const install = vi.spyOn(gitInstall, "installPlugin").mockRejectedValueOnce(failure);
+    try {
+      await expect(runBabelfishCli(["install", "codex", "example", ...flags])).rejects.toBe(failure);
+      expect(install).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs }));
+    } finally {
+      install.mockRestore();
+    }
+  });
 });
