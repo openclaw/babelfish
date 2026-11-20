@@ -154,6 +154,13 @@ if (process.argv[2] !== "--worker") {
   await write(consumer, "runtime-import.mjs", `export { default } from "${packageName}";\n`);
   const plugin = (await import(pathToFileURL(path.join(consumer, "runtime-import.mjs")).href)).default;
   assert.equal(plugin.id, "babelfish");
+  const cliRoots = [];
+  plugin.register({
+    registrationMode: "cli-metadata",
+    registerCli: (_register, options) => cliRoots.push(...options.commands),
+    get runtime() { throw new Error("Runtime unavailable during CLI metadata discovery"); },
+  });
+  assert.deepEqual(cliRoots.sort(), ["babelfish", "simplecli"]);
   const hooks = new Map();
   const commands = [];
   let factory;
