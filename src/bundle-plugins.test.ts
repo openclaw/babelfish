@@ -824,16 +824,17 @@ process.exitCode = ${code};
       path.join(root, ".claude-plugin", "plugin.json"),
       JSON.stringify({ name: "conventional-plus-dir", hooks: "./hooks" }),
     );
-    const hook = { SessionStart: [{ hooks: [{ type: "command", command: "exit 0" }] }] };
-    await fs.writeFile(path.join(hooksDir, "hooks.json"), JSON.stringify({ hooks: hook }));
+    const hook = (command: string) => ({ SessionStart: [{ hooks: [{ type: "command", command }] }] });
+    await fs.writeFile(path.join(hooksDir, "hooks.json"), JSON.stringify({ hooks: hook("exit 1") }));
     for (let index = 1; index < MAX_HOOK_JSON_FILES; index += 1) {
       await fs.writeFile(
         path.join(hooksDir, `hook-${String(index).padStart(2, "0")}.json`),
-        JSON.stringify({ hooks: hook }),
+        JSON.stringify({ hooks: hook("exit 0") }),
       );
     }
     const plugin = await inspectBundlePlugin("claude-code", root);
     expect(plugin.hooks).toHaveLength(MAX_HOOK_JSON_FILES);
+    expect(plugin.hooks[0]?.command).toBe("exit 1");
   });
 
   it("counts unique JSON hook files at and above the Codex directory limit", async () => {

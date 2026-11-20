@@ -313,11 +313,8 @@ async function readHooks(
     collectHooks(app, asObject(inline.hooks) ?? inline, hooks, unsupported);
   }
   const seen = new Set<string>();
-  let remainingJsonFiles = MAX_HOOK_JSON_FILES;
   for (const candidate of paths) {
-    const discovered = await hookFiles(root, candidate, remainingJsonFiles, seen);
-    remainingJsonFiles -= discovered.length;
-    for (const file of discovered) {
+    for (const file of await hookFiles(root, candidate, seen)) {
       const raw = await readJson(file);
       const events = asObject(raw?.hooks) ?? raw;
       if (events) {
@@ -331,7 +328,6 @@ async function readHooks(
 async function hookFiles(
   root: string,
   candidate: string,
-  remainingJsonFiles: number,
   seen: Set<string>,
 ): Promise<string[]> {
   const target = underRoot(root, candidate);
@@ -347,43 +343,33 @@ async function hookFiles(
   if (stats.isSymbolicLink()) {
     throw new Error(`Plugin hook path uses a symlink: ${candidate}`);
   }
-  if (!stats.isDirectory()) {
-    if (seen.has(target)) {
-      return [];
-    }
-    if (remainingJsonFiles <= 0) {
+  const files: string[] = [];
+  function addFile(file: string): void {
+    if (seen.has(file)) return;
+    if (seen.size >= MAX_HOOK_JSON_FILES) {
       throw new Error(`Plugin hook tree exceeded the ${MAX_HOOK_JSON_FILES}-file limit`);
     }
-    seen.add(target);
-    return [target];
+    seen.add(file);
+    files.push(file);
   }
-  const files: string[] = [];
+  if (!stats.isDirectory()) {
+    addFile(target);
+    return files;
+  }
   async function walk(directory: string, depth: number): Promise<void> {
     if (depth > MAX_HOOK_WALK_DEPTH) {
       throw new Error(`Plugin hook tree exceeded the ${MAX_HOOK_WALK_DEPTH}-directory depth limit`);
     }
-    const dir = await fs.opendir(directory);
-    try {
-      for await (const entry of dir) {
-        const child = path.join(directory, entry.name);
-        if (entry.isSymbolicLink()) {
-          throw new Error(`Plugin hook path uses a symlink: ${path.relative(root, child)}`);
-        }
-        if (entry.isDirectory()) {
-          await walk(child, depth + 1);
-        } else if (entry.isFile() && entry.name.endsWith(".json")) {
-          if (seen.has(child)) {
-            continue;
-          }
-          if (files.length >= remainingJsonFiles) {
-            throw new Error(`Plugin hook tree exceeded the ${MAX_HOOK_JSON_FILES}-file limit`);
-          }
-          seen.add(child);
-          files.push(child);
-        }
+    for await (const entry of await fs.opendir(directory)) {
+      const child = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Plugin hook path uses a symlink: ${path.relative(root, child)}`);
       }
-    } finally {
-      await dir.close().catch(() => undefined);
+      if (entry.isDirectory()) {
+        await walk(child, depth + 1);
+      } else if (entry.isFile() && entry.name.endsWith(".json")) {
+        addFile(child);
+      }
     }
   }
   await walk(target, 0);
