@@ -43,7 +43,7 @@ describe("Hermes decision-provider availability", () => {
         const session = { sessionId: `session-${kind}` };
         const { releaseHermesBridge } = await import("./hermes-python.js");
         const { resolveConfig } = await import("./config.js");
-        release = () => releaseHermesBridge(resolveConfig(undefined), session);
+        release = () => releaseHermesBridge(resolveConfig(), session);
         const result = hooks.get("before_tool_call")!({ toolName: "fixture", params: {} }, session);
         if (kind === "empty" || kind === "missing") {
           await expect(result).resolves.toBeUndefined();
@@ -94,7 +94,7 @@ describe("Hermes decision-provider availability", () => {
       await expect(transform({ ...event, toolName: "other" }, session)).resolves.toBeUndefined();
       await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining("unsupported hook transform_terminal_output")));
     } finally {
-      releaseHermesBridge(resolveConfig(undefined), session);
+      releaseHermesBridge(resolveConfig(), session);
       vi.unstubAllEnvs();
       await fs.rm(root, { recursive: true, force: true });
     }

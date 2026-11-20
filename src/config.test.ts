@@ -1,30 +1,34 @@
+import os from "node:os";
 import path from "node:path";
 import { resolveConfig } from "./config.js";
 
 describe("resolveConfig", () => {
-  it("defaults to python3 and a usable install dir", () => {
-    const config = resolveConfig(undefined);
-    expect(config.python).toBe("python3");
-    expect(config.installDir).toContain(path.join("babelfish", "hermes"));
-    expect(config.rootDir).toContain("babelfish");
-    expect(config.timeoutMs).toBe(120000);
+  beforeEach(() => {
+    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", undefined);
+    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", undefined);
+    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PYTHON", undefined);
+    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS", undefined);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("uses the default root independently of the Hermes directory", () => {
+    const rootDir = path.join(os.homedir(), ".openclaw", "babelfish");
+    expect(resolveConfig()).toMatchObject({ rootDir, installDir: path.join(rootDir, "hermes"), python: "python3", timeoutMs: 120_000 });
+    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", "~/custom-hermes");
+    expect(resolveConfig()).toMatchObject({ rootDir, installDir: path.join(os.homedir(), "custom-hermes") });
   });
 
-  it("keeps only string env values", () => {
-    const config = resolveConfig({
-      env: { HERMES_HOME: "/tmp/hermes", DROP: 1 },
-      timeoutMs: 10,
-    });
-    expect(config.env).toEqual({ HERMES_HOME: "/tmp/hermes" });
-    expect(config.timeoutMs).toBe(1000);
+  it("reads the bundle root, Python executable and deadline from the environment", () => {
+    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", "~/bundles");
+    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PYTHON", "fixture-python");
+    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS", "4500");
+    expect(resolveConfig()).toMatchObject({ rootDir: path.join(os.homedir(), "bundles"), python: "fixture-python", timeoutMs: 4500 });
   });
 
-  it("expands a leading home marker in installDir", () => {
-    expect(resolveConfig({ installDir: "~/custom-hermes" }).installDir).not.toContain("~");
-  });
-
-  it("does not derive bundle storage from a Hermes-only override", () => {
-    const config = resolveConfig({ installDir: "/opt/hermes-plugins" });
-    expect(config.rootDir).not.toBe("/opt");
-  });
+  it.each([["10", 1000], ["2147483647", 2147483647], ["2147483648", 120_000]])(
+    "resolves a timer boundary of %s ms to %i ms", (input, expected) => {
+      vi.stubEnv("OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS", String(input));
+      expect(resolveConfig().timeoutMs).toBe(expected);
+    },
+  );
 });

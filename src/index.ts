@@ -118,7 +118,7 @@ const UNSUPPORTED_WARNING_MIDDLEWARE = new Set([
   "tool_execution",
 ]);
 
-const config = resolveConfig(undefined);
+const config = resolveConfig();
 const sessionStartContext = new Map<string, string[]>();
 const sessionStartPending = new Map<string, Promise<void>>();
 const sessionStartOwners = new Map<string, symbol>();
@@ -440,7 +440,7 @@ function registerToolHooks(api: OpenClawApi): void {
     async (event, ctx) => {
       const hook = await invokeHook("transform_tool_result", {
         ...event,
-        result: text(event.result),
+        result: stringifyResult(event.result),
         task_id: sessionKey(event, ctx) ?? "",
       }, ctx);
       const replacement = hook.results.find((value): value is string => typeof value === "string");
