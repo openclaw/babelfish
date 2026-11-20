@@ -2,8 +2,8 @@ import { spawnSync } from "node:child_process";
 import { EventEmitter, once } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import { tempDir } from "../test/temp-dir.js";
 import {
   commandForPlatformShell,
   expandSingleQuotedShellVariables,
@@ -690,7 +690,7 @@ describe("spawnShellCommand", () => {
   it("terminates argv command descendants with their supervisor", async () => {
     const child = spawnShellCommand([
       process.execPath, "-e",
-      "const {spawn}=require('node:child_process'); const worker=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log(worker.pid); setInterval(()=>{},1000);",
+      "const {spawn}=require('node:child_process'); const worker=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log(String(worker.pid)); setInterval(()=>{},1000);",
     ], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
     let workerPid: number | undefined;
     const closed = once(child, "close");
@@ -785,7 +785,7 @@ describe("spawnMonitorShellCommand", () => {
   });
 
   it("retires a monitor supervisor after its command tree drains", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-monitor-"));
+    const root = await tempDir("babelfish-monitor-");
     await fs.writeFile(path.join(root, "monitor.mjs"), "console.log('ready');");
     const child = spawnMonitorShellCommand("node monitor.mjs", {
       cwd: root,
