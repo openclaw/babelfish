@@ -314,7 +314,8 @@ describe("Hermes MCP server", () => {
         name: "babelfish_task_status",
         arguments: { id: startedIds[0] },
       });
-      expect(JSON.parse(String(held.content?.[0]?.text)).status).toBe("running");
+      expect(held.structuredContent).toEqual({ id: startedIds[0], status: "running", startedAt: expect.any(Number) });
+      expect(JSON.parse(String(held.content?.[0]?.text))).toEqual(held.structuredContent);
 
       const overflow = await client.callTool({
         name: "babelfish_task_start",
@@ -326,7 +327,17 @@ describe("Hermes MCP server", () => {
       );
 
       const released = startedIds.pop();
-      await client.callTool({ name: "babelfish_task_stop", arguments: { id: released } });
+      const stop = { name: "babelfish_task_stop", arguments: { id: released } };
+      const poll = { name: "babelfish_task_status", arguments: { id: released } };
+      const stopped = await client.callTool(stop);
+      expect(stopped.structuredContent).toMatchObject({ id: released, status: "stopped" });
+      expect(await client.callTool(stop)).toEqual(stopped);
+      expect(await client.callTool(poll)).toEqual(stopped);
+      for (const request of [poll, stop]) {
+        expect(await client.callTool(request)).toMatchObject({
+          isError: true, content: [{ type: "text", text: `Unknown Babelfish task: ${released}` }],
+        });
+      }
       const afterStop = await client.callTool({
         name: "babelfish_task_start",
         arguments: { kind: "tool", name: "simple_echo", args: { value: "after-stop" } },

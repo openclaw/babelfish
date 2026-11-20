@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { tempDir } from "../test/temp-dir.js";
 import { hookTestApi } from "../test/hook-api.js";
 
 const failureSources = {
@@ -99,6 +100,31 @@ describe("Hermes decision-provider availability", () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 15_000);
+
+  it.each([["tool_request", "args"], ["llm_request", "request"]] as const)(
+    "chains %s rewrites while keeping the original input available",
+    async (kind, field) => {
+      const root = await tempDir("babelfish-rewrite-");
+      const config = { rootDir: root, installDir: root, python: "python3", timeoutMs: 10_000, env: {} };
+      const session = { sessionId: "rewrite" };
+      const { invokeHermesMiddleware, releaseHermesBridge } = await import("./hermes-python.js");
+      await writePlugin(root, "rewrite", [
+        "def register(ctx):",
+        `    ctx.register_middleware('${kind}', lambda ${field}: {'${field}': {'value': ${field}['value'] + 1}})`,
+        `    ctx.register_middleware('${kind}', lambda: {'${field}': 'ignored'})`,
+        `    def finish(${field}, original_${field}):`,
+        `        return {'${field}': {'current': ${field}['value'], 'original': original_${field}['value']}}`,
+        `    ctx.register_middleware('${kind}', finish)`,
+      ].join("\n"));
+      try {
+        const result = await invokeHermesMiddleware(config, { kind, kwargs: { [field]: { value: 1 } }, context: session });
+        expect(result.results).toEqual([{ [field]: { current: 2, original: 1 } }]);
+      } finally {
+        releaseHermesBridge(config, session);
+      }
+    },
+    15_000,
+  );
 
   it("continues to later hook and request middleware callbacks after an observer fails", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-observer-"));
