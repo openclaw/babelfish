@@ -580,13 +580,16 @@ process.exitCode = ${code};
     }
   }, 30_000);
 
-  it("passes each pre-tool rewrite to subsequent hooks", async () => {
+  it.each([false, true])("passes pre-tool rewrites to subsequent hooks (diagnostic prefix: %s)", async (logFirst) => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-root-"));
     const pluginRoot = path.join(rootDir, "codex", "fixture");
     await fs.mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
     await fs.writeFile(
       path.join(pluginRoot, "rewrite.mjs"),
-      "process.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify({hookSpecificOutput:{updatedInput:{value:2}}})));",
+      [
+        logFirst ? "console.log('rewriting input');" : "",
+        "process.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify({hookSpecificOutput:{updatedInput:{value:2}}})));",
+      ].join("\n"),
     );
     await fs.writeFile(
       path.join(pluginRoot, "validate.mjs"),
