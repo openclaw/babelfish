@@ -108,6 +108,7 @@ const UNSUPPORTED_WARNING_HOOKS = new Set([
   "kanban_task_completed",
   "kanban_task_blocked",
   "transform_llm_output",
+  "transform_terminal_output",
 ]);
 
 const UNSUPPORTED_WARNING_MIDDLEWARE = new Set([
@@ -267,10 +268,6 @@ async function invokeMiddleware(kind: string, event: unknown, ctx: unknown) {
 
 function firstRecord(results: unknown[]): Record<string, unknown> | undefined {
   return results.map(record).find((item) => Object.keys(item).length > 0);
-}
-
-function firstString(results: unknown[]): string | undefined {
-  return results.find((item): item is string => typeof item === "string" && item.length > 0);
 }
 
 function promptMutation(value: unknown): Record<string, string> | undefined {
@@ -445,15 +442,13 @@ function registerToolHooks(api: OpenClawApi): void {
 
   api.registerAgentToolResultMiddleware(
     async (event, ctx) => {
-      const [toolResult, terminalResult] = await Promise.all([
-        invokeHook("transform_tool_result", event, ctx),
-        invokeHook("transform_terminal_output", event, ctx),
-      ]);
-      const transformed = firstString([
-        ...toolResult.results,
-        ...terminalResult.results,
-      ]);
-      return transformed ? { result: textResult(transformed) } : undefined;
+      const hook = await invokeHook("transform_tool_result", {
+        ...event,
+        result: text(event.result),
+        task_id: sessionKey(event, ctx) ?? "",
+      }, ctx);
+      const replacement = hook.results.find((value): value is string => typeof value === "string");
+      return replacement === undefined ? undefined : { result: textResult(replacement) };
     },
     { runtimes: ["openclaw", "codex"] },
   );

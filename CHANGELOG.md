@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pass Hermes tool-result hooks the serialized result and session identifier, honor empty replacements, and warn when a plugin requests the terminal-only output hook.
+
 - Refresh Vitest to 5.1.0 and CodeQL to 4.39.3, and patch transitive Hono vulnerabilities while retaining Node.js 22.19 support. Thanks @dependabot! #64 #65
 
 - Refresh the MCP SDK and Node typings, and patch transitive body-parser, fast-uri, ip-address, qs, and Zod vulnerabilities while preserving Node.js 22.19 support. Thanks @dependabot! #59 #60
