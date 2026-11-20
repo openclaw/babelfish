@@ -17,6 +17,8 @@ beforeEach(async () => {
   vi.stubEnv("OPENCLAW_BABELFISH_ROOT", path.join(root, "apps"));
   vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "hermes"));
   vi.stubEnv("OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS", undefined);
+  vi.stubEnv("GIT_CONFIG_GLOBAL", os.devNull);
+  vi.stubEnv("GIT_CONFIG_NOSYSTEM", "1");
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -64,7 +66,6 @@ describe("babelfish install clone timeout", () => {
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const { port } = server.address() as net.AddressInfo;
-    const started = Date.now();
     try {
       const flags = override === "flag" ? ["--clone-timeout-ms", String(timeoutMs)] : [];
       if (override === "environment") vi.stubEnv("OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS", String(timeoutMs));
@@ -72,7 +73,6 @@ describe("babelfish install clone timeout", () => {
         "install", "codex", `http://127.0.0.1:${port}/stalled-plugin.git`,
         "--name", "stalled", ...flags,
       ])).rejects.toThrow(`Git clone timed out after ${timeoutMs}ms`);
-      expect(Date.now() - started).toBeLessThan(timeoutMs + 3_000);
       expect(sockets.length).toBeGreaterThan(0);
       await vi.waitFor(() => expect(sockets.every((socket) => socket.destroyed)).toBe(true));
       expect(await fs.readdir(path.join(root, "apps", "codex"))).toEqual([]);

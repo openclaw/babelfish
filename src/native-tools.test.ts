@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { tempDir } from "../test/temp-dir.js";
 import { buildNativeToolEntries, createNativeTools, normalizeMcpContent, regenerateNativeTools } from "./native-tools.js";
 
 const fixtureTimeoutMs = 15_000;
@@ -34,9 +35,9 @@ async function writeCommandFixture(root: string, name: string): Promise<void> {
 
 describe("native generated tools", () => {
   it("generates live MCP resource and prompt tools", async () => {
-    const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-mcp-state-"));
+    const stateRoot = await tempDir("babelfish-mcp-state-");
     const plugin = path.join(stateRoot, "codex", "fixture");
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-package-"));
+    const root = await tempDir("babelfish-package-");
     const sdk = path.join(process.cwd(), "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
     const sdkUrl = (file: string) => pathToFileURL(path.join(sdk, file)).href;
     await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
@@ -77,9 +78,9 @@ await server.connect(new StdioServerTransport());
   }, 30_000);
 
   it("generates only operations advertised by each MCP server", async () => {
-    const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-mcp-state-"));
+    const stateRoot = await tempDir("babelfish-mcp-state-");
     const plugin = path.join(stateRoot, "codex", "fixture");
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-package-"));
+    const root = await tempDir("babelfish-package-");
     const sdk = path.join(process.cwd(), "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
     const sdkUrl = (file: string) => pathToFileURL(path.join(sdk, file)).href;
     await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
@@ -216,8 +217,8 @@ await server.connect(new StdioServerTransport());
   });
 
   it("suffixes generated slash and CLI command names after sanitizing plugin slugs", async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-commands-"));
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-package-"));
+    const installDir = await tempDir("openclaw-hermes-commands-");
+    const root = await tempDir("openclaw-babelfish-package-");
     await Promise.all([writeCommandFixture(installDir, "a.b"), writeCommandFixture(installDir, "a_b")]);
     await fs.mkdir(path.join(root, "skills"), { recursive: true });
     await fs.writeFile(
@@ -226,7 +227,7 @@ await server.connect(new StdioServerTransport());
     );
 
     await regenerateNativeTools(
-      { installDir, python: "python3", timeoutMs: 10000, env: {} },
+      { rootDir: root, installDir, python: "python3", timeoutMs: 10000, env: {} },
       { root },
     );
 
@@ -269,8 +270,8 @@ await server.connect(new StdioServerTransport());
   });
 
   it("writes generated registry and OpenClaw manifest tool contracts", async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-native-tools-"));
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-package-"));
+    const installDir = await tempDir("openclaw-babelfish-native-tools-");
+    const root = await tempDir("openclaw-babelfish-package-");
     await copyFixture(installDir);
     await fs.mkdir(path.join(root, "skills"), { recursive: true });
     await fs.writeFile(
@@ -287,7 +288,7 @@ await server.connect(new StdioServerTransport());
 
     await expect(
       regenerateNativeTools(
-        { installDir, python: "python3", timeoutMs: 10000, env: {} },
+        { rootDir: root, installDir, python: "python3", timeoutMs: 10000, env: {} },
         { root },
       ),
     ).resolves.toEqual({
@@ -337,8 +338,8 @@ await server.connect(new StdioServerTransport());
   });
 
   it("keeps generated contracts when an installed plugin fails to load", async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-native-tools-"));
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-package-"));
+    const installDir = await tempDir("openclaw-babelfish-native-tools-");
+    const root = await tempDir("openclaw-babelfish-package-");
     const broken = path.join(installDir, "broken");
     await fs.mkdir(broken);
     await fs.writeFile(path.join(broken, "plugin.yaml"), "name: broken\n");
@@ -351,7 +352,7 @@ await server.connect(new StdioServerTransport());
 
     await expect(
       regenerateNativeTools(
-        { installDir, python: "python3", timeoutMs: 10000, env: {} },
+        { rootDir: root, installDir, python: "python3", timeoutMs: 10000, env: {} },
         { root },
       ),
     ).rejects.toThrow("broken");
@@ -364,9 +365,9 @@ await server.connect(new StdioServerTransport());
   });
 
   it.each(["\n", "\r\n"])("preserves skill and command frontmatter with %j line endings", async (eol) => {
-    const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-bundle-state-"));
+    const stateRoot = await tempDir("babelfish-bundle-state-");
     const plugin = path.join(stateRoot, "claude-code", "fixture");
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-package-"));
+    const root = await tempDir("babelfish-package-");
     await fs.mkdir(path.join(plugin, ".claude-plugin"), { recursive: true });
     await fs.writeFile(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "fixture" }));
     await fs.mkdir(path.join(plugin, "skills", "review"), { recursive: true });
@@ -389,9 +390,9 @@ await server.connect(new StdioServerTransport());
   });
 
   it.each(["\n", "\r\n"])("reads block descriptions from commands, agents and output styles with %j", async (eol) => {
-    const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-bundle-state-"));
+    const stateRoot = await tempDir("babelfish-bundle-state-");
     const plugin = path.join(stateRoot, "claude-code", "fixture");
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-package-"));
+    const root = await tempDir("babelfish-package-");
     await fs.mkdir(path.join(plugin, ".claude-plugin"), { recursive: true });
     await fs.writeFile(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "fixture" }));
     await fs.mkdir(path.join(plugin, "commands"), { recursive: true });
@@ -474,7 +475,5 @@ await server.connect(new StdioServerTransport());
     await expect(fs.readFile(path.join(root, "openclaw.plugin.json"), "utf8")).resolves.toBe(beforeManifest);
     await expect(fs.readFile(path.join(root, "babelfish.generated.json"), "utf8")).resolves.toBe(beforeRegistry);
     await expect(fs.readFile(path.join(skills, "claude-code-fixture-copied", "SKILL.md"), "utf8")).resolves.toBe(copiedSkill);
-    await fs.rm(stateRoot, { recursive: true, force: true });
-    await fs.rm(root, { recursive: true, force: true });
   });
 });

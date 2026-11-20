@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { tempDir } from "../test/temp-dir.js";
 import { build } from "esbuild";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -297,7 +298,7 @@ describe("Hermes MCP server", () => {
   });
 
   it("serves installed Hermes tools over MCP", { timeout: 15_000 }, async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-"));
+    const installDir = await tempDir("openclaw-hermes-mcp-");
     await copyFixture(installDir, "simple-hermes-plugin", "simple");
 
     const server = createHermesMcpServer({
@@ -368,7 +369,7 @@ describe("Hermes MCP server", () => {
     });
 
     const server = createHermesMcpServer({
-      installDir: await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-cap-")),
+      installDir: await tempDir("openclaw-hermes-mcp-cap-"),
       python: "python3",
       timeoutMs: 10000,
       env: {},
@@ -451,7 +452,7 @@ describe("Hermes MCP server", () => {
     });
 
     const server = createHermesMcpServer({
-      installDir: await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-publish-")),
+      installDir: await tempDir("openclaw-hermes-mcp-publish-"),
       python: "python3",
       timeoutMs: 10000,
       env: {},
@@ -533,8 +534,8 @@ describe("Hermes MCP server", () => {
     "rejects a replacement start while a stopped child is still exiting",
     { timeout: 45_000 },
     async () => {
-      const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-hold-"));
-      const markerRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-hold-markers-"));
+      const installDir = await tempDir("openclaw-hermes-mcp-hold-");
+      const markerRoot = await tempDir("openclaw-hermes-hold-markers-");
       await writeHoldPlugin(installDir);
       const server = createHermesMcpServer({
         installDir,
@@ -618,8 +619,8 @@ describe("Hermes MCP server", () => {
     "rejects a replacement start while a completed helper is still exiting",
     { timeout: 45_000 },
     async () => {
-      const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-done-"));
-      const markerRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-done-markers-"));
+      const installDir = await tempDir("openclaw-hermes-mcp-done-");
+      const markerRoot = await tempDir("openclaw-hermes-done-markers-");
       await writeHoldPlugin(installDir);
       const server = createHermesMcpServer({
         installDir,
@@ -724,8 +725,8 @@ describe("Hermes MCP server", () => {
     "rejects a replacement start while a timed-out helper is still exiting",
     { timeout: 60_000 },
     async () => {
-      const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-mcp-timeout-"));
-      const markerRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-hermes-timeout-markers-"));
+      const installDir = await tempDir("openclaw-hermes-mcp-timeout-");
+      const markerRoot = await tempDir("openclaw-hermes-timeout-markers-");
       await writeHoldPlugin(installDir);
       const server = createHermesMcpServer({
         installDir,

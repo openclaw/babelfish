@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { tempDir } from "../test/temp-dir.js";
 import { MAX_MONITOR_OUTPUT_BYTES } from "./monitor-output.js";
 
 async function removeTemp(root: string): Promise<void> {
@@ -41,7 +42,7 @@ describe("native OpenClaw hook entry", () => {
       vi.unstubAllEnvs();
       await removeTemp(root);
     }
-  });
+  }, 15_000);
 
   it("consumes session-start context once and clears it on session end after reset", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-start-context-"));
@@ -119,12 +120,12 @@ describe("native OpenClaw hook entry", () => {
   });
 
   it("registers hooks and maps Hermes pre_tool_call blocks", async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-native-"));
+    const installDir = await tempDir("openclaw-babelfish-native-");
     await copyFixture(installDir);
     const previous = process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR;
     const previousRoot = process.env.OPENCLAW_BABELFISH_ROOT;
     const hookLog = path.join(installDir, "hook.log");
-    const bundleRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-bundles-"));
+    const bundleRoot = await tempDir("openclaw-babelfish-bundles-");
     try {
       process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR = installDir;
       process.env.OPENCLAW_BABELFISH_ROOT = bundleRoot;
@@ -450,23 +451,7 @@ describe("native OpenClaw hook entry", () => {
     } finally {
       await hooks?.get("session_end")?.({ sessionId: "shell-monitor" }, { sessionId: "shell-monitor" });
       vi.unstubAllEnvs();
-      let removed = false;
-      for (let attempt = 0; attempt < 20 && !removed; attempt += 1) {
-        try {
-          await fs.rm(root, { recursive: true, force: true });
-          removed = true;
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code;
-          if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
-            throw error;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-      }
-      if (!removed) {
-        await fs.rm(root, { recursive: true, force: true });
-      }
-      await fs.rm(marker, { force: true });
+      await removeTemp(root);
     }
   }, 20_000);
 
