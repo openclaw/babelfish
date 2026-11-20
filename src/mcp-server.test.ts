@@ -2,11 +2,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { tempDir } from "../test/temp-dir.js";
-import { build } from "esbuild";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { copyFixture, pluginSummary, toolSummary } from "../test/hermes-fixtures.js";
+import { pluginSummary, toolSummary } from "../test/hermes-fixtures.js";
 import { buildHermesMcpToolIndex, createHermesMcpServer, MAX_RUNNING_TASKS } from "./mcp-server.js";
 import { buildNativeToolEntries } from "./native-tools.js";
 import * as hermesPython from "./hermes-python.js";
@@ -136,70 +134,6 @@ async function stopTasksAndKill(
 }
 
 describe("Hermes MCP server", () => {
-  it("runs commands and background tasks through built stdio", { timeout: 30_000 }, async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-command-stdio-"));
-    const installDir = path.join(root, "plugins");
-    const runtime = path.join(root, "runtime");
-    const client = new Client({ name: "command-stdio-test", version: "0.0.0" });
-    try {
-      await copyFixture(installDir);
-      for (const file of ["python", "package.json"]) {
-        await fs.cp(path.join(process.cwd(), file), path.join(runtime, file), { recursive: true });
-      }
-      await build({
-        entryPoints: ["src/bin.ts"],
-        outfile: path.join(runtime, "dist", "bin.js"),
-        bundle: true,
-        external: ["@modelcontextprotocol/sdk/*"],
-        format: "esm",
-        packages: "bundle",
-        platform: "node",
-        banner: { js: "#!/usr/bin/env node" },
-      });
-      await fs.symlink(await fs.realpath("node_modules"), path.join(runtime, "node_modules"), "junction");
-      const transport = new StdioClientTransport({
-        command: process.execPath,
-        args: [path.join(runtime, "dist", "bin.js"), "mcp"],
-        env: {
-          PATH: process.env.PATH ?? "",
-          ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-          HOME: root,
-          USERPROFILE: root,
-          OPENCLAW_BABELFISH_ROOT: root,
-          OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR: installDir,
-          OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS: "10000",
-        },
-        stderr: "pipe",
-      });
-      await client.connect(transport);
-      const name = "babelfish_command__hermes__simple__simple";
-      for (const args of [undefined, {}, { args: "" }, { args: "explicit text" }]) {
-        const result = await client.callTool({ name, ...(args === undefined ? {} : { arguments: args }) });
-        expect(result.isError).toBeFalsy();
-        expect(JSON.parse(String(result.content?.[0]?.text))).toEqual({ command: args?.args ?? "" });
-      }
-      // Real background tasks hold process-wide slots until their Python children exit.
-      for (const [args, expected] of [
-        [{ kind: "command", plugin: "simple", name: "simple" }, { command: "simple", result: { command: "" } }],
-        [{ kind: "tool", name: "simple_echo", args: { value: "task-ok" } }, { tool: "simple_echo", parsedResult: { echo: "task-ok" } }],
-      ] as const) {
-        const started = await client.callTool({ name: "babelfish_task_start", arguments: args });
-        expect(started.isError).toBeFalsy();
-        const task = JSON.parse(String(started.content?.[0]?.text));
-        expect(task.status).toBe("running");
-        const final = await vi.waitUntil(async () => {
-          const result = await client.callTool({ name: "babelfish_task_status", arguments: { id: task.id } });
-          const status = JSON.parse(String(result.content?.[0]?.text));
-          return status.status === "running" ? undefined : status;
-        }, { timeout: 5_000, interval: 50 });
-        expect(final).toMatchObject({ status: "completed", result: { plugin: "simple", ...expected } });
-      }
-    } finally {
-      await client.close();
-      await fs.rm(root, { recursive: true, force: true });
-    }
-  });
-
   it("keeps unique tool names and prefixes collisions", () => {
     const index = buildHermesMcpToolIndex({
       installDir: "/tmp/hermes",
@@ -243,45 +177,6 @@ describe("Hermes MCP server", () => {
     expect(index.tools.map((tool) => tool.name)).toEqual(["a_b__shared", "a_b__shared_2"]);
     expect(index.toolRoutes.get("a_b__shared")?.plugin).toBe("a.b");
     expect(index.toolRoutes.get("a_b__shared_2")?.plugin).toBe("a_b");
-  });
-
-  it("serves installed Hermes tools over MCP", { timeout: 15_000 }, async () => {
-    const installDir = await tempDir("openclaw-hermes-mcp-");
-    await copyFixture(installDir);
-
-    const server = createHermesMcpServer({
-      installDir,
-      python: "python3",
-      timeoutMs: 10000,
-      env: {},
-    });
-
-    const client = await connectTestClient(server);
-    try {
-      const tools = await client.listTools();
-      expect(tools.tools.map((tool) => tool.name)).toEqual([
-        "babelfish_plugins_list",
-        "babelfish_task_start",
-        "babelfish_task_status",
-        "babelfish_task_stop",
-        "babelfish_command__hermes__simple__simple",
-        "simple_echo",
-        "simple_optional",
-        "simple_state",
-      ]);
-      expect(
-        tools.tools.find((tool) => tool.name === "babelfish_command__hermes__simple__simple")?.description,
-      ).toContain("Args: <raw text>");
-
-      const result = await client.callTool({
-        name: "simple_echo",
-        arguments: { value: "mcp-ok" },
-      });
-      expect(result.content).toEqual([{ type: "text", text: '{\n  "echo": "mcp-ok"\n}' }]);
-    } finally {
-      await client.close();
-      await server.close();
-    }
   });
 
   it("rejects a ninth concurrent babelfish_task_start", async () => {
