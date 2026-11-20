@@ -37,6 +37,8 @@
 - Register Babelfish management and imported CLI commands during OpenClaw metadata discovery so the host can invoke them before runtime activation.
 - Run macOS CI on the Apple Silicon Xcode 27 image while retaining Node.js 22.19 support.
 
+- Keep Hermes session state when a caller cancels a request that already failed JSON encoding.
+
 - Pass Hermes tool-result hooks the serialized result and session identifier, honor empty replacements, and warn when a plugin requests the terminal-only output hook.
 
 ## 0.1.2 — 2026-10-17
