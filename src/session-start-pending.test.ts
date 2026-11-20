@@ -1,20 +1,32 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { hookTestApi } from "../test/hook-api.js";
+import { tempDir } from "../test/temp-dir.js";
+
+async function mockSessionPlugins(prefix: string) {
+  const root = await tempDir(prefix);
+  vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
+  vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "hermes"));
+  vi.resetModules();
+  const hermes = await import("./hermes-python.js");
+  const bundles = await import("./bundle-plugins.js");
+  vi.spyOn(hermes, "listHermesPlugins").mockResolvedValue({ installDir: root, plugins: [] });
+  vi.spyOn(bundles, "listBundlePlugins").mockResolvedValue([]);
+  return { hermes, bundles };
+}
 
 describe("rejected session start", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
   it.each([
     ["session_end", "pending"], ["session_end", "consumed"],
     ["before_reset", "pending"], ["before_reset", "consumed"],
     ["session_end", "empty"], ["before_reset", "empty"],
   ])("does not let older %s cleanup erase a %s replacement", async (eventName, mode) => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-start-owner-"));
-    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
-    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "hermes"));
-    vi.resetModules();
-    const hermes = await import("./hermes-python.js");
-    const bundles = await import("./bundle-plugins.js");
+    const { hermes, bundles } = await mockSessionPlugins("babelfish-start-owner-");
     let releaseEnd!: () => void;
     let releaseStart!: () => void;
     const endWait = new Promise<void>((resolve) => { releaseEnd = resolve; });
@@ -25,8 +37,6 @@ describe("rejected session start", () => {
       return { hook: params.hook, invoked: [], results: [] };
     });
     const release = vi.spyOn(hermes, "releaseHermesBridge").mockImplementation(() => {});
-    vi.spyOn(hermes, "listHermesPlugins").mockResolvedValue({ installDir: root, plugins: [] });
-    vi.spyOn(bundles, "listBundlePlugins").mockResolvedValue([]);
     vi.spyOn(bundles, "invokeBundleHooks").mockImplementation(async (_config, event) => {
       if (event === "SessionEnd") await endWait;
       if (event !== "SessionStart") return [];
@@ -61,19 +71,11 @@ describe("rejected session start", () => {
     } finally {
       releaseEnd();
       releaseStart();
-      vi.restoreAllMocks();
-      vi.unstubAllEnvs();
-      await fs.rm(root, { recursive: true, force: true });
     }
   });
 
   it.each(["replacement", "end"])("preserves callback ordering across session %s", async (mode) => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-start-lifecycle-"));
-    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
-    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "hermes"));
-    vi.resetModules();
-    const hermes = await import("./hermes-python.js");
-    const bundles = await import("./bundle-plugins.js");
+    const { hermes, bundles } = await mockSessionPlugins("babelfish-start-lifecycle-");
     const calls: string[] = [];
     let releaseHook!: () => void;
     let releaseStart!: () => void;
@@ -86,8 +88,6 @@ describe("rejected session start", () => {
       if (params.hook === "on_session_start" && holdStart) await waitStart;
       return { hook: params.hook, invoked: [], results: [] };
     });
-    vi.spyOn(hermes, "listHermesPlugins").mockResolvedValue({ installDir: root, plugins: [] });
-    vi.spyOn(bundles, "listBundlePlugins").mockResolvedValue([]);
     vi.spyOn(bundles, "invokeBundleHooks").mockImplementation(async (_config, event) => {
       if (event === "SessionStart" && mode === "end") await waitStart;
       return [];
@@ -120,14 +120,11 @@ describe("rejected session start", () => {
     } finally {
       releaseHook();
       releaseStart();
-      vi.restoreAllMocks();
-      vi.unstubAllEnvs();
-      await fs.rm(root, { recursive: true, force: true });
     }
   });
 
   it("initializes real Hermes state before a concurrent turn callback", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-start-order-"));
+    const root = await tempDir("babelfish-start-order-");
     const plugin = path.join(root, "hermes", "stateful");
     vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
     vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "hermes"));
@@ -155,18 +152,11 @@ describe("rejected session start", () => {
       await start;
     } finally {
       await hooks.get("session_end")?.({}, session);
-      vi.unstubAllEnvs();
-      await fs.rm(root, { recursive: true, force: true });
     }
   });
 
   it("keeps concurrent prepares waiting and does not remove a newer start", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-pending-start-"));
-    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
-    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "hermes"));
-    vi.resetModules();
-    const hermes = await import("./hermes-python.js");
-    const bundles = await import("./bundle-plugins.js");
+    const { hermes, bundles } = await mockSessionPlugins("babelfish-pending-start-");
     let releaseFirst!: () => void;
     let releaseSecond!: () => void;
     const waits = [
@@ -178,23 +168,16 @@ describe("rejected session start", () => {
       if (params.hook === "on_session_start") await waits[starts++];
       return { hook: params.hook, invoked: [], results: params.hook === "pre_llm_call" ? ["turn context"] : [] };
     });
-    vi.spyOn(hermes, "listHermesPlugins").mockResolvedValue({ installDir: root, plugins: [] });
-    vi.spyOn(bundles, "listBundlePlugins").mockResolvedValue([]);
     vi.spyOn(bundles, "invokeBundleHooks").mockImplementation(async (_config, event) =>
       event === "SessionStart" ? [{ systemMessage: "start context" }] : []);
-    const hooks = new Map<string, (event: unknown, ctx: unknown) => Promise<unknown>>();
+    const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
     try {
       const entry = (await import("./index.js")).default;
-      entry.register({
-        on: (name, handler) => { hooks.set(name, handler as (event: unknown, ctx: unknown) => Promise<unknown>); },
-        registerTool: () => undefined, registerCommand: () => undefined,
-        registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        logger: { warn: () => undefined },
-      });
+      entry.register(hookTestApi(hooks));
       const session = { sessionId: "pending-session" };
       const firstStart = hooks.get("session_start")!({}, session);
       let settled = 0;
-      const prepare = () => hooks.get("agent_turn_prepare")!({}, session).then((value) => {
+      const prepare = () => Promise.resolve(hooks.get("agent_turn_prepare")!({}, session)).then((value) => {
         settled += 1;
         return value;
       });
@@ -217,15 +200,12 @@ describe("rejected session start", () => {
     } finally {
       releaseFirst();
       releaseSecond();
-      vi.restoreAllMocks();
-      vi.unstubAllEnvs();
-      await fs.rm(root, { recursive: true, force: true });
     }
   });
 
   it("does not fail later turns after session_start times out", async () => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-session-start-"));
-    const bundleRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-babelfish-bundles-"));
+    const installDir = await tempDir("openclaw-babelfish-session-start-");
+    const bundleRoot = await tempDir("openclaw-babelfish-bundles-");
     const pluginDir = path.join(installDir, "slow-start");
     await fs.mkdir(pluginDir);
     await fs.writeFile(path.join(pluginDir, "plugin.yaml"), "name: slow-start\n");
@@ -250,19 +230,8 @@ describe("rejected session start", () => {
       vi.stubEnv("OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS", "200");
       vi.resetModules();
       const module = await import("./index.js");
-      const logger = { warn: vi.fn() };
-      const api = {
-        logger,
-        on: vi.fn((name: string, handler: (event: unknown, ctx: unknown) => unknown) => {
-          hooks.set(name, handler);
-        }),
-        registerTool: vi.fn(),
-        registerCommand: vi.fn(),
-        registerCli: vi.fn(),
-        registerAgentToolResultMiddleware: vi.fn(),
-      };
-
-      module.default.register(api);
+      const warn = vi.fn();
+      module.default.register(hookTestApi(hooks, warn));
 
       await expect(
         hooks.get("session_start")?.({ sessionId: "slow-session" }, session),
@@ -272,13 +241,10 @@ describe("rejected session start", () => {
       for (let turn = 0; turn < 3; turn += 1) {
         await expect(prepare?.({}, session)).resolves.toEqual({ prependContext: "after timeout" });
       }
-      expect(logger.warn.mock.calls.filter(([message]) =>
+      expect(warn.mock.calls.filter(([message]) =>
         String(message).startsWith("Babelfish session start failed:"))).toHaveLength(1);
     } finally {
       await hooks.get("session_end")?.({ sessionId: "slow-session" }, session);
-      vi.unstubAllEnvs();
-      await fs.rm(installDir, { recursive: true, force: true });
-      await fs.rm(bundleRoot, { recursive: true, force: true });
     }
   }, 20_000);
 });
