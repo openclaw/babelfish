@@ -717,14 +717,6 @@ export async function inspectBundleServer(
   }
 }
 
-export async function listBundleServerTools(
-  plugin: BundlePlugin,
-  server: BundleServer,
-  timeoutMs: number,
-) {
-  return (await inspectBundleServer(plugin, server, timeoutMs)).tools;
-}
-
 export async function callBundleTool(
   plugin: BundlePlugin,
   server: BundleServer,
