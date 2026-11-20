@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { copyFixture, pluginSummary, toolSummary } from "../test/hermes-fixtures.js";
+import * as hermes from "./hermes-python.js";
 import { tempDir } from "../test/temp-dir.js";
 import { buildNativeToolEntries, createNativeTools, normalizeMcpContent, readGeneratedNativeToolRegistry, regenerateNativeTools } from "./native-tools.js";
 
@@ -221,7 +222,7 @@ await server.connect(new StdioServerTransport());
     expect(() => readGeneratedNativeToolRegistry(root)).toThrow(SyntaxError);
   });
 
-  it("writes generated registry and OpenClaw manifest tool contracts", async () => {
+  it("writes generated registry and OpenClaw manifest tool contracts", async ({ onTestFinished }) => {
     const installDir = await tempDir("openclaw-babelfish-native-tools-");
     const root = await tempDir("openclaw-babelfish-package-");
     await copyFixture(installDir);
@@ -238,6 +239,8 @@ await server.connect(new StdioServerTransport());
       ),
     );
 
+    const discovery = vi.spyOn(hermes, "listHermesPlugins");
+    onTestFinished(() => discovery.mockRestore());
     await expect(
       regenerateNativeTools(
         { rootDir: root, installDir, python: "python3", timeoutMs: 10000, env: {} },
@@ -247,6 +250,7 @@ await server.connect(new StdioServerTransport());
       generatedTools: ["simple_echo", "simple_optional", "simple_state"],
       restartRequired: true,
     });
+    expect(discovery).toHaveBeenCalledTimes(1);
 
     const manifest = JSON.parse(await fs.readFile(path.join(root, "openclaw.plugin.json"), "utf8"));
     expect(manifest.contracts).toEqual({

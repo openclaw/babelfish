@@ -523,7 +523,7 @@ export async function regenerateNativeTools(
       manifestSkillDirs,
       root,
     );
-    await syncHermesSkills(config, root);
+    await syncHermesSkills(config, root, list);
   } catch (error) {
     await restoreFile(registryTarget, previousRegistry);
     await restoreFile(manifestTarget, previousManifest);

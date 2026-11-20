@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reuse Hermes plugin discovery when generating tools and skills during an install or uninstall.
+
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.

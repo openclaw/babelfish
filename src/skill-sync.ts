@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { uniqueName } from "./tool-names.js";
 import type { HermesBridgeConfig } from "./config.js";
-import { listHermesPlugins, readHermesSkill } from "./hermes-python.js";
+import { listHermesPlugins, readHermesSkill, type HermesListResult } from "./hermes-python.js";
 
 function packageRoot(): string {
   return path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -19,36 +19,14 @@ function slug(value: string): string {
   );
 }
 
-function yamlString(value: string): string {
-  return JSON.stringify(value);
-}
-
-function skillMarkdown(params: {
-  name: string;
-  description: string;
-  plugin: string;
-  skill: string;
-  text: string;
-}): string {
-  return [
-    "---",
-    `name: ${params.name}`,
-    `description: ${yamlString(params.description || `Imported skill ${params.plugin}/${params.skill}`)}`,
-    "---",
-    "",
-    params.text,
-    "",
-  ].join("\n");
-}
-
 export async function syncHermesSkills(
   config: HermesBridgeConfig,
   rootDir = packageRoot(),
+  inventory?: HermesListResult,
 ): Promise<string[]> {
-  const list = await listHermesPlugins(config);
+  const list = inventory ?? await listHermesPlugins(config);
   const generatedRoot = path.join(rootDir, "skills", "babelfish-generated");
   const desired = new Set<string>();
-  const written: string[] = [];
   for (const plugin of list.plugins) {
     for (const skill of plugin.skills) {
       if (!skill.available) {
@@ -59,18 +37,17 @@ export async function syncHermesSkills(
       const loaded = await readHermesSkill(config, { plugin: plugin.key, skill: skill.name });
       const dir = path.join(generatedRoot, name);
       await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(
-        path.join(dir, "SKILL.md"),
-        skillMarkdown({
-          name,
-          description: loaded.description || skill.description,
-          plugin: plugin.key,
-          skill: skill.name,
-          text: loaded.text,
-        }),
-        "utf-8",
-      );
-      written.push(name);
+      const description = loaded.description || skill.description || `Imported skill ${plugin.key}/${skill.name}`;
+      const markdown = [
+        "---",
+        `name: ${name}`,
+        `description: ${JSON.stringify(description)}`,
+        "---",
+        "",
+        loaded.text,
+        "",
+      ];
+      await fs.writeFile(path.join(dir, "SKILL.md"), markdown.join("\n"), "utf-8");
     }
   }
   await fs.mkdir(generatedRoot, { recursive: true });
@@ -79,5 +56,5 @@ export async function syncHermesSkills(
       await fs.rm(path.join(generatedRoot, entry.name), { recursive: true, force: true });
     }
   }
-  return written;
+  return [...desired];
 }
