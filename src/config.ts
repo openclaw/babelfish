@@ -4,6 +4,15 @@ import path from "node:path";
 export const SUPPORTED_APPS = ["hermes", "claude-code", "codex"] as const;
 export type SupportedApp = (typeof SUPPORTED_APPS)[number];
 
+export function isSupportedApp(value: unknown): value is SupportedApp {
+  return SUPPORTED_APPS.includes(value as SupportedApp);
+}
+
+export function requireApp(value: unknown): SupportedApp {
+  if (isSupportedApp(value)) return value;
+  throw new Error(`Unsupported app: ${String(value || "(missing)")}`);
+}
+
 export type BabelfishConfig = {
   installDir: string;
   rootDir: string;
