@@ -319,8 +319,7 @@ process.exitCode = ${code};
     const outputPath = path.join(rootDir, "output.txt");
     const marker = path.join(rootDir, "marker");
     const payload = payloadFor(marker);
-    const previous = process.env.CLAUDE_PROJECT_DIR;
-    process.env.CLAUDE_PROJECT_DIR = payload;
+    vi.stubEnv("CLAUDE_PROJECT_DIR", payload);
     try {
       expect(marker).not.toMatch(/[\s'$]/);
       await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
@@ -344,8 +343,7 @@ process.exitCode = ${code};
       await expect(fs.stat(marker)).rejects.toThrow();
       await expect(fs.readFile(outputPath, "utf8")).resolves.toBe(payload);
     } finally {
-      if (previous === undefined) delete process.env.CLAUDE_PROJECT_DIR;
-      else process.env.CLAUDE_PROJECT_DIR = previous;
+      vi.unstubAllEnvs();
       await fs.rm(rootDir, { recursive: true, force: true });
       await fs.rm(marker, { force: true });
     }
@@ -443,8 +441,7 @@ process.exitCode = ${code};
   it.skipIf(process.platform !== "win32")("still blocks a cmd comparison when the flag contains an apostrophe", async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-cmd-apostrophe-"));
     const plugin = path.join(rootDir, "codex", "fixture");
-    const previous = process.env.BABELFISH_TEST_FLAG;
-    process.env.BABELFISH_TEST_FLAG = "den'y";
+    vi.stubEnv("BABELFISH_TEST_FLAG", "den'y");
     try {
       await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
       const command = "if '${BABELFISH_TEST_FLAG}'=='den'y' exit /b 2";
@@ -459,13 +456,12 @@ process.exitCode = ${code};
       expect(denied).toEqual([
         { decision: "block", reason: expect.any(String) },
       ]);
-      process.env.BABELFISH_TEST_FLAG = "allow";
+      vi.stubEnv("BABELFISH_TEST_FLAG", "allow");
       const allowed = await invokeBundleHooks(config, "PreToolUse", {});
       expect(allowed).toEqual([]);
       console.log("Windows shell receipt", JSON.stringify({ denied: denied.length, allowed: allowed.length }));
     } finally {
-      if (previous === undefined) delete process.env.BABELFISH_TEST_FLAG;
-      else process.env.BABELFISH_TEST_FLAG = previous;
+      vi.unstubAllEnvs();
       await fs.rm(rootDir, { recursive: true, force: true });
     }
   });
@@ -477,8 +473,7 @@ process.exitCode = ${code};
     const capturePath = path.join(rootDir, "capture.cjs");
     const outputPath = path.join(rootDir, "output.txt");
     const payload = `x'; touch ${marker}; echo '`;
-    const previous = process.env.BABELFISH_TEST_FLAG;
-    process.env.BABELFISH_TEST_FLAG = payload;
+    vi.stubEnv("BABELFISH_TEST_FLAG", payload);
     try {
       expect(marker).not.toMatch(/[\s'$]/);
       await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
@@ -499,8 +494,7 @@ process.exitCode = ${code};
       await expect(fs.stat(marker)).rejects.toThrow();
       await expect(fs.readFile(outputPath, "utf8")).resolves.toBe(payload);
     } finally {
-      if (previous === undefined) delete process.env.BABELFISH_TEST_FLAG;
-      else process.env.BABELFISH_TEST_FLAG = previous;
+      vi.unstubAllEnvs();
       await fs.rm(rootDir, { recursive: true, force: true });
       await fs.rm(marker, { force: true });
     }
@@ -509,8 +503,7 @@ process.exitCode = ${code};
   it("preserves earlier decisions, context, rewrites and later hooks after expansion failure", async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-unset-hook-"));
     const plugin = path.join(rootDir, "codex", "fixture");
-    const previous = process.env.CLAUDE_PROJECT_DIR;
-    delete process.env.CLAUDE_PROJECT_DIR;
+    vi.stubEnv("CLAUDE_PROJECT_DIR", undefined);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
@@ -542,8 +535,7 @@ process.exitCode = ${code};
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("CLAUDE_PROJECT_DIR"));
     } finally {
       warn.mockRestore();
-      if (previous === undefined) delete process.env.CLAUDE_PROJECT_DIR;
-      else process.env.CLAUDE_PROJECT_DIR = previous;
+      vi.unstubAllEnvs();
       await fs.rm(rootDir, { recursive: true, force: true });
     }
   });

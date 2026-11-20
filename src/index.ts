@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import { asObject, stringifyResult } from "./json.js";
 import { appendMonitorContext, createMonitorOutputReader, MAX_MONITOR_OUTPUT_BYTES } from "./monitor-output.js";
 import { resolveConfig } from "./config.js";
 import {
@@ -126,9 +127,7 @@ const monitorProcesses = new Map<string, ChildProcess[]>();
 const monitorContext = new Map<string, string[]>();
 
 function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return asObject(value) ?? {};
 }
 
 function snakeCase(value: string): string {
@@ -290,10 +289,6 @@ function promptMutation(value: unknown): Record<string, string> | undefined {
 
 function textResult(text: string): Record<string, unknown> {
   return { content: [{ type: "text", text }] };
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
 
 function bundlePayload(eventName: string, event: unknown, ctx: unknown): Record<string, unknown> {
@@ -480,7 +475,7 @@ export function registerHermesCommands(api: OpenClawApi, generated?: GeneratedCo
           args: ctx.args ?? "",
           context: context(ctx),
         });
-        return { text: text(result.result) };
+        return { text: stringifyResult(result.result) };
       },
     });
   }
@@ -534,7 +529,7 @@ export function registerHermesCliCommands(
               process.stderr.write(result.stderr);
             }
             if (result.result !== null && result.result !== undefined) {
-              const output = text(result.result);
+              const output = stringifyResult(result.result);
               console.log(output);
             }
           });
