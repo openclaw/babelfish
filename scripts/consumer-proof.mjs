@@ -13,6 +13,13 @@ const nodeTypesVersion = "26.6.3";
 const script = fileURLToPath(import.meta.url);
 const packageRoot = path.resolve(path.dirname(script), "..");
 
+let phaseStart = performance.now();
+function reportPhase(name) {
+  const now = performance.now();
+  console.error(`[package consumer] ${name}: ${Math.round(now - phaseStart)} ms`);
+  phaseStart = now;
+}
+
 if (process.argv[2] !== "--worker") {
   const target = process.argv[2];
   const runtimeOnly = process.argv[3] === "--runtime-only";
@@ -49,13 +56,16 @@ if (process.argv[2] !== "--worker") {
       await fs.mkdir(tools);
       await fs.writeFile(path.join(tools, "package.json"), '{"private":true}\n');
       run(npm, ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact", `typescript@${compilerVersion}`, `@types/node@${nodeTypesVersion}`], tools);
+      reportPhase("install type tools");
     }
     const consumer = path.join(root, "consumer");
     await fs.mkdir(consumer);
     await fs.writeFile(path.join(consumer, "package.json"), '{"private":true,"type":"module"}\n');
     run(npm, ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact", target.startsWith("@") ? target : path.resolve(target)], consumer);
+    reportPhase("install package");
     // The worker runs the full lifecycle suite, not just one bounded command.
     run(process.execPath, [script, "--worker", consumer, ...(runtimeOnly ? [] : [path.resolve(tools)])], consumer, 360_000);
+    reportPhase("run consumer lifecycle");
     if (process.env.BABELFISH_AUDIT_SIGNATURES === "1") {
       assert(target.startsWith("@"), "registry installation required for signature audit");
       const audit = JSON.parse(run(npm, ["audit", "signatures", "--json", "--include-attestations"], consumer));
@@ -70,7 +80,9 @@ if (process.argv[2] !== "--worker") {
     workerError = error;
   } finally {
     try {
+      phaseStart = performance.now();
       await fs.rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
+      reportPhase("cleanup");
     } catch (error) {
       if (!workerError) workerError = error;
     }
@@ -129,6 +141,7 @@ if (process.argv[2] !== "--worker") {
     const skill = path.join(installed, "skills", "babelfish-bundles", `${app}-${names[app]}-demo`, "SKILL.md");
     assert((await fs.readFile(skill, "utf8")).includes(`${app} consumer fixture`));
   }
+  reportPhase("CLI installs and generated files");
   const sdk = async (specifier) => {
     const resolved = requireInstalled.resolve(`@modelcontextprotocol/sdk/${specifier}`);
     assert(resolved.startsWith(path.join(consumer, "node_modules") + path.sep));
@@ -182,6 +195,7 @@ if (process.argv[2] !== "--worker") {
   } finally {
     await hooks.get("session_end")({ sessionId: "consumer-session" }, context);
   }
+  reportPhase("MCP and plugin runtime");
   if (tools) {
     for (const [name, version] of [["typescript", compilerVersion], ["@types/node", nodeTypesVersion]]) {
       assert.equal((await json(path.join(tools, "node_modules", name, "package.json"))).version, version, "separate pinned type toolchain");
@@ -190,6 +204,7 @@ if (process.argv[2] !== "--worker") {
     await write(consumer, "tsconfig.json", JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, skipLibCheck: false, types: ["node"], typeRoots: [path.join(tools, "node_modules", "@types")] }, files: ["probe.mts"] }));
     const compiler = path.join(tools, "node_modules", "typescript", "bin", "tsc");
     run(process.execPath, [compiler, "-p", path.join(consumer, "tsconfig.json")]);
+    reportPhase("check declarations");
   }
   const snapshot = async (root) => {
     const entries = {};
@@ -226,4 +241,5 @@ if (process.argv[2] !== "--worker") {
   await echo();
   for (const app of Object.keys(names)) cli(["uninstall", app, names[app]]);
   assert(cli(["list"]).apps.every((entry) => entry.plugins.length === 0));
+  reportPhase("rollback and uninstall");
 }

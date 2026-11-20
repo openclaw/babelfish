@@ -4,6 +4,8 @@
 
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
+- Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log.
+
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.
 
 - Update the Vitest test runner to 5.1.1.
