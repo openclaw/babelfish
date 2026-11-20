@@ -1,9 +1,7 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import { commitFixture, stalledGitRemote } from "../test/git-fixtures.js";
 import { tempDir } from "../test/temp-dir.js";
 import {
   installPlugin,
@@ -13,8 +11,6 @@ import {
   uninstallPlugin,
   validateHermesPluginDirectory,
 } from "./git-install.js";
-
-const execFileAsync = promisify(execFile);
 
 describe("sanitizePluginName", () => {
   it("accepts boring repo names", () => {
@@ -56,39 +52,25 @@ describe("plugin lifecycle", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it.each([false, true])("cleans up a timed-out clone and preserves existing state (force=%s)", async (force) => {
-    const installDir = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-timeout-"));
+    const installDir = await tempDir("babelfish-timeout-");
     const target = path.join(installDir, "plugin");
-    const sockets: net.Socket[] = [];
-    const server = net.createServer((socket) => {
-      sockets.push(socket);
-      socket.on("error", (error: NodeJS.ErrnoException) => expect(error.code).toBe("ECONNRESET"));
-      socket.resume();
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const { port } = server.address() as net.AddressInfo;
+    const remote = await stalledGitRemote();
     const afterChange = vi.fn();
     const validate = vi.fn();
-    try {
-      if (force) {
-        await fs.mkdir(target);
-        await fs.writeFile(path.join(target, "marker"), "kept");
-      }
-      await expect(installPlugin({
-        installDir, source: `http://127.0.0.1:${port}/stalled.git`,
-        name: "plugin", force, timeoutMs: process.platform === "win32" ? 10_000 : 2_000,
-        validate, afterChange,
-      })).rejects.toThrow(/Git clone timed out/);
-      expect(validate).not.toHaveBeenCalled();
-      expect(afterChange).not.toHaveBeenCalled();
-      expect(await fs.readdir(installDir)).toEqual(force ? ["plugin"] : []);
-      if (force) expect(await fs.readFile(path.join(target, "marker"), "utf8")).toBe("kept");
-      expect(sockets.length).toBeGreaterThan(0);
-      await vi.waitFor(() => expect(sockets.every((socket) => socket.destroyed)).toBe(true));
-    } finally {
-      for (const socket of sockets) socket.destroy();
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-      await fs.rm(installDir, { recursive: true, force: true });
+    if (force) {
+      await fs.mkdir(target);
+      await fs.writeFile(path.join(target, "marker"), "kept");
     }
+    await expect(installPlugin({
+      installDir, source: remote.url,
+      name: "plugin", force, timeoutMs: process.platform === "win32" ? 10_000 : 2_000,
+      validate, afterChange,
+    })).rejects.toThrow(/Git clone timed out/);
+    expect(validate).not.toHaveBeenCalled();
+    expect(afterChange).not.toHaveBeenCalled();
+    expect(await fs.readdir(installDir)).toEqual(force ? ["plugin"] : []);
+    if (force) expect(await fs.readFile(path.join(target, "marker"), "utf8")).toBe("kept");
+    await remote.expectDisconnected();
   }, 20_000);
 
   it.each([0, -1, 1.5, NaN, Infinity, 2_147_483_648])("rejects invalid programmatic timeout %s before creating staging", async (timeoutMs) => {
@@ -124,9 +106,7 @@ describe("plugin lifecycle", () => {
     const source = path.join(root, "source");
     await fs.mkdir(path.join(source, ".codex-plugin"), { recursive: true });
     await fs.writeFile(path.join(source, ".codex-plugin", "plugin.json"), "{}");
-    await execFileAsync("git", ["-C", source, "init", "-q"]);
-    await execFileAsync("git", ["-C", source, "add", "."]);
-    await execFileAsync("git", ["-C", source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"]);
+    await commitFixture(source);
     await expect(installPlugin({
       installDir,
       source,
@@ -164,19 +144,7 @@ describe("plugin lifecycle", () => {
     await fs.mkdir(path.join(source, "__init__.py"));
     await fs.writeFile(path.join(source, "plugin.yaml", "marker"), "directory");
     await fs.writeFile(path.join(source, "__init__.py", "marker"), "directory");
-    await execFileAsync("git", ["-C", source, "init", "-q"]);
-    await execFileAsync("git", ["-C", source, "add", "."]);
-    await execFileAsync("git", [
-      "-C",
-      source,
-      "-c",
-      "user.name=Test",
-      "-c",
-      "user.email=test@example.invalid",
-      "commit",
-      "-qm",
-      "fixture",
-    ]);
+    await commitFixture(source);
 
     await expect(
       installPlugin({ installDir, source, name: "existing", force: true, validate: validateHermesPluginDirectory }),
@@ -194,19 +162,7 @@ describe("plugin lifecycle", () => {
     await fs.mkdir(source);
     await fs.writeFile(path.join(source, "plugin.yaml"), "name: replacement\n");
     await fs.writeFile(path.join(source, "__init__.py"), "def register(ctx): pass\n");
-    await execFileAsync("git", ["-C", source, "init", "-q"]);
-    await execFileAsync("git", ["-C", source, "add", "."]);
-    await execFileAsync("git", [
-      "-C",
-      source,
-      "-c",
-      "user.name=Test",
-      "-c",
-      "user.email=test@example.invalid",
-      "commit",
-      "-qm",
-      "fixture",
-    ]);
+    await commitFixture(source);
 
     await expect(
       installPlugin({

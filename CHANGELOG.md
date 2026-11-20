@@ -2,15 +2,19 @@
 
 ## Unreleased
 
+- Check the package on Node.js 26 in Linux CI and honor the selected npm cache during offline consumer validation.
+
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
-- Keep Hermes session state when a caller cancels a request that already failed JSON encoding.
+- Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log.
 
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.
 
 - Update the Vitest test runner to 5.1.1.
 
 - Refresh Vitest to 5.1.0 and CodeQL to 4.39.3, and patch transitive Hono vulnerabilities while retaining Node.js 22.19 support. Thanks @dependabot! #64 #65
+
+- Run the platform test matrix without repeating fresh package installs when only source test files change.
 
 - Skip platform and constrained-memory CI for changes limited to contributor guidance and issue or PR templates.
 
@@ -28,6 +32,8 @@
 - Update the pinned CodeQL actions to 4.39.0 for repository security scanning. Thanks @dependabot.
 - Register Babelfish management and imported CLI commands during OpenClaw metadata discovery so the host can invoke them before runtime activation.
 - Run macOS CI on the Apple Silicon Xcode 27 image while retaining Node.js 22.19 support.
+
+- Keep Hermes session state when a caller cancels a request that already failed JSON encoding.
 
 - Pass Hermes tool-result hooks the serialized result and session identifier, honor empty replacements, and warn when a plugin requests the terminal-only output hook.
 
