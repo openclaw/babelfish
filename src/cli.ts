@@ -1,12 +1,12 @@
-import { inspectBundlePlugin, listBundlePlugins, summarizeBundlePlugin, validateBundlePluginDirectory } from "./bundle-plugins.js";
-import { appInstallDir, resolveConfig, SUPPORTED_APPS, type SupportedApp } from "./config.js";
+import { inspectBundlePlugin, summarizeBundlePlugin, validateBundlePluginDirectory } from "./bundle-plugins.js";
+import { appInstallDir, requireApp, resolveConfig } from "./config.js";
 import {
   installPlugin,
   resolveCloneTimeoutMs,
   uninstallPlugin,
   validateHermesPluginDirectory,
 } from "./git-install.js";
-import { listHermesPlugins } from "./hermes-python.js";
+import { listInstalledPlugins } from "./plugin-inventory.js";
 import { regenerateNativeTools } from "./native-tools.js";
 
 function readOptionValue(args: string[], name: string): string | undefined {
@@ -44,13 +44,6 @@ function usage(): string {
   ].join("\n");
 }
 
-function requireApp(value: string | undefined): SupportedApp {
-  if (SUPPORTED_APPS.includes(value as SupportedApp)) {
-    return value as SupportedApp;
-  }
-  throw new Error(`Unsupported app: ${value || "(missing)"}`);
-}
-
 export async function runBabelfishCli(args: string[]): Promise<void> {
   const command = args[0];
   if (!command || command === "-h" || command === "--help") {
@@ -66,25 +59,8 @@ export async function runBabelfishCli(args: string[]): Promise<void> {
   }
 
   if (command === "list") {
-    const app = args[1];
-    if (app) {
-      const supported = requireApp(app);
-      console.log(JSON.stringify(
-        supported === "hermes"
-          ? { app: supported, ...(await listHermesPlugins(config)) }
-          : { app: supported, plugins: (await listBundlePlugins(config, supported)).map(summarizeBundlePlugin) },
-        null,
-        2,
-      ));
-      return;
-    }
-    console.log(
-      JSON.stringify({ apps: [
-        { app: "hermes", ...(await listHermesPlugins(config)) },
-        { app: "claude-code", plugins: (await listBundlePlugins(config, "claude-code")).map(summarizeBundlePlugin) },
-        { app: "codex", plugins: (await listBundlePlugins(config, "codex")).map(summarizeBundlePlugin) },
-      ] }, null, 2),
-    );
+    const app = args[1] ? requireApp(args[1]) : undefined;
+    console.log(JSON.stringify(await listInstalledPlugins(config, app), null, 2));
     return;
   }
 
