@@ -1,5 +1,0 @@
-name: relative
-version: 1.0.0
-description: "Relative import Hermes fixture plugin"
-provides_tools:
-  - relative_echo
