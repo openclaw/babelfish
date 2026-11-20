@@ -2,6 +2,8 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
+  ErrorCode,
+  McpError,
   ListToolsRequestSchema,
   type CallToolResult,
   type Tool,
@@ -333,58 +335,27 @@ export function createHermesMcpServer(config: HermesBridgeConfig): Server {
 
     const list = await listHermesPlugins(config);
     const index = buildHermesMcpToolIndex(list);
-    const commandRoute = index.commandRoutes.get(request.params.name);
-    if (commandRoute) {
-      const result = await callHermesCommand(
-        config,
-        {
-          plugin: commandRoute.plugin,
-          command: commandRoute.name,
-          args: asObject(request.params.arguments)?.args ?? "",
-        },
-        { isolated: true },
-      );
-      return {
-        content: [{ type: "text", text: stringifyResult(result.result) }],
-        structuredContent: asObject(result.result),
-        _meta: {
-          "babelfish/app": "hermes",
-          "babelfish/plugin": result.plugin,
-          "babelfish/command": result.command,
-        },
-      };
-    }
-
-    const route = index.toolRoutes.get(request.params.name);
+    const command = index.commandRoutes.get(request.params.name);
+    const route = command ?? index.toolRoutes.get(request.params.name);
     if (!route) {
-      return {
-        isError: true,
-        content: [{ type: "text", text: `Unknown Babelfish MCP tool: ${request.params.name}` }],
-      };
+      throw new McpError(ErrorCode.InvalidParams, `Unknown Babelfish MCP tool: ${request.params.name}`);
     }
-
     try {
-      const result = await callHermesTool(
-        config,
-        {
-          plugin: route.plugin,
-          tool: route.name,
-          args: request.params.arguments ?? {},
-        },
-        { isolated: true },
-      );
+      const result = command
+        ? await callHermesCommand(config, {
+            plugin: route.plugin, command: route.name, args: request.params.arguments?.args ?? "",
+          }, { isolated: true })
+        : await callHermesTool(config, {
+            plugin: route.plugin, tool: route.name, args: request.params.arguments ?? {},
+          }, { isolated: true });
+      const value = "tool" in result ? result.parsedResult ?? result.result : result.result;
       return {
-        content: [
-          {
-            type: "text",
-            text: stringifyResult(result.parsedResult ?? result.result),
-          },
-        ],
-        structuredContent: asObject(result.parsedResult ?? result.result),
+        content: [{ type: "text", text: stringifyResult(value) }],
+        structuredContent: asObject(value),
         _meta: {
           "babelfish/app": "hermes",
           "babelfish/plugin": result.plugin,
-          "babelfish/tool": result.tool,
+          ...("tool" in result ? { "babelfish/tool": result.tool } : { "babelfish/command": result.command }),
         },
       };
     } catch (error) {

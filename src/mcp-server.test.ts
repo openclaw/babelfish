@@ -577,4 +577,35 @@ describe("Hermes MCP server", () => {
       }
     },
   );
+
+  it("returns Python command errors to the caller and rejects unknown tool names", async () => {
+    const installDir = await tempDir("babelfish-mcp-errors-");
+    const dir = path.join(installDir, "demo");
+    await fs.mkdir(dir);
+    await fs.writeFile(path.join(dir, "plugin.yaml"), "name: demo\n");
+    await fs.writeFile(path.join(dir, "__init__.py"), [
+      "def command(raw):",
+      "    if raw == 'fail':",
+      "        raise ValueError('expected fixture failure')",
+      "    return raw",
+      "def register(ctx):",
+      "    ctx.register_command('run', command, 'Run a command')",
+    ].join("\n"));
+    const server = createHermesMcpServer({ installDir, python: "python3", timeoutMs: 10_000, env: {} });
+    const client = await connectTestClient(server);
+    try {
+      const name = "babelfish_command__hermes__demo__run";
+      const failed = await client.callTool({ name, arguments: { args: "fail" } });
+      expect(failed).toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: expect.stringContaining("expected fixture failure") }],
+      });
+      await expect(client.callTool({ name: "unknown" })).rejects.toMatchObject({ code: -32602 });
+      const retry = await client.callTool({ name, arguments: { args: "ok" } });
+      expect(retry.content).toEqual([{ type: "text", text: "ok" }]);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
 });

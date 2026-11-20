@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Report Hermes command handler failures as MCP tool errors and reject unknown tool names with the JSON-RPC invalid-params code.
+
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.
