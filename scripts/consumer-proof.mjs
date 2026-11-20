@@ -15,6 +15,7 @@ const packageRoot = path.resolve(path.dirname(script), "..");
 
 if (process.argv[2] !== "--worker") {
   const target = process.argv[2];
+  const runtimeOnly = process.argv[3] === "--runtime-only";
   assert(target, "tarball or registry package required");
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-consumer-")));
   const home = path.join(root, "home");
@@ -44,7 +45,7 @@ if (process.argv[2] !== "--worker") {
   let workerError;
   try {
     const tools = process.env.BABELFISH_CONSUMER_TOOLS || path.join(root, "tools");
-    if (!process.env.BABELFISH_CONSUMER_TOOLS) {
+    if (!runtimeOnly && !process.env.BABELFISH_CONSUMER_TOOLS) {
       await fs.mkdir(tools);
       await fs.writeFile(path.join(tools, "package.json"), '{"private":true}\n');
       run(npm, ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact", `typescript@${compilerVersion}`, `@types/node@${nodeTypesVersion}`], tools);
@@ -54,7 +55,7 @@ if (process.argv[2] !== "--worker") {
     await fs.writeFile(path.join(consumer, "package.json"), '{"private":true,"type":"module"}\n');
     run(npm, ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact", target.startsWith("@") ? target : path.resolve(target)], consumer);
     // The worker runs the full lifecycle suite, not just one bounded command.
-    run(process.execPath, [script, "--worker", consumer, path.resolve(tools)], consumer, 360_000);
+    run(process.execPath, [script, "--worker", consumer, ...(runtimeOnly ? [] : [path.resolve(tools)])], consumer, 360_000);
     if (process.env.BABELFISH_AUDIT_SIGNATURES === "1") {
       assert(target.startsWith("@"), "registry installation required for signature audit");
       const audit = JSON.parse(run(npm, ["audit", "signatures", "--json", "--include-attestations"], consumer));
@@ -63,7 +64,7 @@ if (process.argv[2] !== "--worker") {
       assert(audit.verified?.some((entry) => entry.name === packageName && entry.version === "0.1.2"), "explicit Babelfish provenance verification");
       process.stdout.write(`${JSON.stringify(audit)}\n`);
     } else {
-      console.log(JSON.stringify({ package: `${packageName}@0.1.2`, cli: "passed", runtime: "passed", mcp: "passed", declarations: "passed", rollback: "passed", productionOnly: true, offline }));
+      console.log(JSON.stringify({ package: `${packageName}@0.1.2`, cli: "passed", runtime: "passed", mcp: "passed", declarations: runtimeOnly ? "skipped" : "passed", rollback: "passed", productionOnly: true, offline }));
     }
   } catch (error) {
     workerError = error;
@@ -124,7 +125,10 @@ if (process.argv[2] !== "--worker") {
   const manifest = await json(path.join(installed, "openclaw.plugin.json"));
   assert(registry.tools.some((tool) => tool.name === "simple_echo"));
   assert(manifest.contracts.tools.includes("simple_echo"));
-  assert(registry.skillDirs.length >= 2);
+  for (const app of ["claude-code", "codex"]) {
+    const skill = path.join(installed, "skills", "babelfish-bundles", `${app}-${names[app]}-demo`, "SKILL.md");
+    assert((await fs.readFile(skill, "utf8")).includes(`${app} consumer fixture`));
+  }
   const sdk = async (specifier) => {
     const resolved = requireInstalled.resolve(`@modelcontextprotocol/sdk/${specifier}`);
     assert(resolved.startsWith(path.join(consumer, "node_modules") + path.sep));
@@ -140,7 +144,8 @@ if (process.argv[2] !== "--worker") {
       assert.deepEqual(client.getServerVersion(), { name: "babelfish", version: "0.1.2" });
       assert((await client.listTools()).tools.some((tool) => tool.name === "simple_echo"));
       const result = await client.callTool({ name: "simple_echo", arguments: { value: "immutable-consumer-ok" } });
-      assert(!result.isError && JSON.stringify(result).includes("immutable-consumer-ok"));
+      assert(!result.isError);
+      assert.deepEqual(JSON.parse(result.content[0].text), { echo: "immutable-consumer-ok" });
     } finally {
       await client.close();
     }
@@ -153,7 +158,6 @@ if (process.argv[2] !== "--worker") {
   const commands = [];
   let factory;
   plugin.register({
-    pluginConfig: { rootDir: state, installDir: path.join(state, "hermes"), python: "python3", timeoutMs: 15_000 },
     on: (name, handler) => hooks.set(name, handler),
     registerTool: (handler) => { factory = handler; },
     registerCommand: (command) => commands.push(command),
@@ -171,13 +175,15 @@ if (process.argv[2] !== "--worker") {
   } finally {
     await hooks.get("session_end")({ sessionId: "consumer-session" }, context);
   }
-  for (const [name, version] of [["typescript", compilerVersion], ["@types/node", nodeTypesVersion]]) {
-    assert.equal((await json(path.join(tools, "node_modules", name, "package.json"))).version, version, "separate pinned type toolchain");
+  if (tools) {
+    for (const [name, version] of [["typescript", compilerVersion], ["@types/node", nodeTypesVersion]]) {
+      assert.equal((await json(path.join(tools, "node_modules", name, "package.json"))).version, version, "separate pinned type toolchain");
+    }
+    await write(consumer, "probe.mts", 'import plugin, { registerNativeTools } from "@openclaw/babelfish";\nconst registration: typeof plugin.register = plugin.register;\nvoid registration; void registerNativeTools;\n');
+    await write(consumer, "tsconfig.json", JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, skipLibCheck: false, types: ["node"], typeRoots: [path.join(tools, "node_modules", "@types")] }, files: ["probe.mts"] }));
+    const compiler = path.join(tools, "node_modules", "typescript", "bin", "tsc");
+    run(process.execPath, [compiler, "-p", path.join(consumer, "tsconfig.json")]);
   }
-  await write(consumer, "probe.mts", 'import plugin, { registerNativeTools } from "@openclaw/babelfish";\nconst registration: typeof plugin.register = plugin.register;\nvoid registration; void registerNativeTools;\n');
-  await write(consumer, "tsconfig.json", JSON.stringify({ compilerOptions: { target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext", strict: true, noEmit: true, skipLibCheck: false, types: ["node"], typeRoots: [path.join(tools, "node_modules", "@types")] }, files: ["probe.mts"] }));
-  const compiler = path.join(tools, "node_modules", "typescript", "bin", "tsc");
-  run(process.execPath, [compiler, "-p", path.join(consumer, "tsconfig.json"), "--traceResolution"]);
   const snapshot = async (root) => {
     const entries = {};
     const walk = async (relative) => {

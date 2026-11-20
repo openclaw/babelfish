@@ -2,7 +2,16 @@ name: CI
 
 on:
   pull_request:
+    paths-ignore: &contributor_metadata
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/pull_request_template.md"
+      - "AGENTS.md"
+      - "CODE_OF_CONDUCT.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "SUPPORT.md"
   push:
+    paths-ignore: *contributor_metadata
     branches:
       - main
   workflow_dispatch:
@@ -68,4 +77,9 @@ jobs:
         run: npm run check
 
       - name: Verify package contents
-        run: npm run pack:check
+        shell: bash
+        run: |
+          # Keep the consumer install isolated while reusing setup-node's npm downloads.
+          BABELFISH_CONSUMER_CACHE="$(npm config get cache | tr -d '\r')"
+          export BABELFISH_CONSUMER_CACHE
+          npm run pack:check

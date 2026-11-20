@@ -16,7 +16,9 @@ ENV BABELFISH_CONSUMER_TOOLS=/consumer-tools BABELFISH_CONSUMER_OFFLINE=1 BABELF
 
 COPY . .
 RUN npm run build
-RUN BABELFISH_CONSUMER_OFFLINE=0 npm run pack:check
+# Warm the production dependency graph for the fresh offline install in the 1 GiB tier.
+RUN npm install --prefix /tmp/package-consumer --install-links --omit=dev --ignore-scripts --no-audit --no-fund /workspace \
+  && rm -rf /tmp/package-consumer
 
 ENTRYPOINT ["./test/low-memory/entrypoint.sh"]
 CMD ["e2e"]
