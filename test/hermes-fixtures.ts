@@ -16,11 +16,7 @@ export function pluginSummary(key: string, tools: HermesToolSummary[]): HermesPl
   };
 }
 
-export async function copyFixture(
-  target: string,
-  fixtureName = "simple-hermes-plugin",
-  installedName = "simple",
-): Promise<void> {
-  const fixture = path.join(process.cwd(), "test/fixtures", fixtureName);
-  await fs.cp(fixture, path.join(target, installedName), { recursive: true });
+export async function copyFixture(target: string): Promise<void> {
+  const fixture = path.join(process.cwd(), "test/fixtures/simple-hermes-plugin");
+  await fs.cp(fixture, path.join(target, "simple"), { recursive: true });
 }
