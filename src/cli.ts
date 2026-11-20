@@ -58,7 +58,7 @@ export async function runBabelfishCli(args: string[]): Promise<void> {
     return;
   }
 
-  const config = resolveConfig(undefined);
+  const config = resolveConfig();
   if (command === "mcp") {
     const { startHermesMcpServer } = await import("./mcp-server.js");
     await startHermesMcpServer(config);

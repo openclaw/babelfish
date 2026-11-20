@@ -47,7 +47,7 @@ describe("Hermes decision-provider availability", () => {
         const session = { sessionId: `session-${kind}` };
         const { releaseHermesBridge } = await import("./hermes-python.js");
         const { resolveConfig } = await import("./config.js");
-        release = () => releaseHermesBridge(resolveConfig(undefined), session);
+        release = () => releaseHermesBridge(resolveConfig(), session);
         const result = hooks.get("before_tool_call")!({ toolName: "fixture", params: {} }, session);
         if (kind === "empty" || kind === "missing") {
           await expect(result).resolves.toBeUndefined();

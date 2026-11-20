@@ -115,7 +115,7 @@ const UNSUPPORTED_WARNING_MIDDLEWARE = new Set([
   "tool_execution",
 ]);
 
-const config = resolveConfig(undefined);
+const config = resolveConfig();
 const sessionStartContext = new Map<string, string[]>();
 const sessionStartPending = new Map<string, Promise<void>>();
 const sessionStartOwners = new Map<string, symbol>();

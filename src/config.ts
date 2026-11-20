@@ -14,23 +14,6 @@ export type BabelfishConfig = {
 
 export type HermesBridgeConfig = BabelfishConfig;
 
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-function readEnv(value: unknown): Record<string, string> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  const env: Record<string, string> = {};
-  for (const [key, raw] of Object.entries(value)) {
-    if (typeof raw === "string") {
-      env[key] = raw;
-    }
-  }
-  return env;
-}
-
 function expandHome(value: string): string {
   if (value === "~") {
     return os.homedir();
@@ -41,32 +24,19 @@ function expandHome(value: string): string {
   return value;
 }
 
-export function defaultInstallDir(): string {
-  return path.join(os.homedir(), ".openclaw", "babelfish", "hermes");
-}
-
-function defaultRootDir(): string {
-  return path.join(os.homedir(), ".openclaw", "babelfish");
-}
-
 export function appInstallDir(config: BabelfishConfig, app: SupportedApp): string {
   return app === "hermes" ? config.installDir : path.join(config.rootDir ?? path.dirname(config.installDir), app);
 }
 
-export function resolveConfig(raw: Record<string, unknown> | undefined): BabelfishConfig {
-  const timeout =
-    typeof raw?.timeoutMs === "number"
-      ? Math.trunc(raw.timeoutMs)
-      : Number.parseInt(process.env.OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS ?? "", 10) || 120000;
-  const installDir =
-    readString(raw?.installDir) ??
-    process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR ??
-    defaultInstallDir();
+export function resolveConfig(): BabelfishConfig {
+  const defaultRoot = path.join(os.homedir(), ".openclaw", "babelfish");
+  const defaultTimeoutMs = 120_000;
+  const timeout = Number.parseInt(process.env.OPENCLAW_BABELFISH_HERMES_TIMEOUT_MS ?? "", 10) || defaultTimeoutMs;
   return {
-    installDir: expandHome(installDir),
-    rootDir: expandHome(readString(raw?.rootDir) ?? process.env.OPENCLAW_BABELFISH_ROOT ?? defaultRootDir()),
-    python: readString(raw?.python) ?? process.env.OPENCLAW_BABELFISH_HERMES_PYTHON ?? "python3",
-    timeoutMs: Math.max(1000, timeout),
-    env: readEnv(raw?.env),
+    installDir: expandHome(process.env.OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR ?? path.join(defaultRoot, "hermes")),
+    rootDir: expandHome(process.env.OPENCLAW_BABELFISH_ROOT ?? defaultRoot),
+    python: process.env.OPENCLAW_BABELFISH_HERMES_PYTHON ?? "python3",
+    timeoutMs: timeout > 2_147_483_647 ? defaultTimeoutMs : Math.max(1000, timeout),
+    env: {},
   };
 }
