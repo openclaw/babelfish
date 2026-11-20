@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { copyFixture, pluginSummary, toolSummary } from "../test/hermes-fixtures.js";
 import { tempDir } from "../test/temp-dir.js";
-import { buildNativeToolEntries, createNativeTools, normalizeMcpContent, regenerateNativeTools } from "./native-tools.js";
+import { buildNativeToolEntries, createNativeTools, normalizeMcpContent, readGeneratedNativeToolRegistry, regenerateNativeTools } from "./native-tools.js";
 
 function sdkUrl(file: string): string {
   return import.meta.resolve(`@modelcontextprotocol/sdk/${file}`);
@@ -205,6 +205,20 @@ await server.connect(new StdioServerTransport());
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("applies the same defaults to missing and partial registries", async () => {
+    const root = await tempDir("babelfish-registry-");
+    const target = path.join(root, "babelfish.generated.json");
+    const empty = readGeneratedNativeToolRegistry(root);
+    expect(empty).toEqual({
+      generatedAt: "", installDir: "", skillDirs: [], unsupported: [],
+      tools: [], commands: [], cliCommands: [], outputStyles: [],
+    });
+    await fs.writeFile(target, JSON.stringify({ skillDirs: ["skills", false], tools: {}, commands: [null] }));
+    expect(readGeneratedNativeToolRegistry(root)).toEqual({ ...empty, skillDirs: ["skills"] });
+    await fs.writeFile(target, "{");
+    expect(() => readGeneratedNativeToolRegistry(root)).toThrow(SyntaxError);
   });
 
   it("writes generated registry and OpenClaw manifest tool contracts", async () => {

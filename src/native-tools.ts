@@ -177,42 +177,27 @@ function manifestPath(root = packageRoot): string {
   return path.join(root, "openclaw.plugin.json");
 }
 
+function validEntries<T>(value: unknown, isEntry: (entry: unknown) => entry is T): T[] {
+  return Array.isArray(value) ? value.filter(isEntry) : [];
+}
+
 export function readGeneratedNativeToolRegistry(root = packageRoot): GeneratedNativeToolRegistry {
+  let parsed: Partial<GeneratedNativeToolRegistry> = {};
   try {
-    const parsed = JSON.parse(fs.readFileSync(registryPath(root), "utf8")) as Partial<GeneratedNativeToolRegistry>;
-    return {
-      generatedAt: typeof parsed.generatedAt === "string" ? parsed.generatedAt : "",
-      installDir: typeof parsed.installDir === "string" ? parsed.installDir : "",
-      skillDirs: Array.isArray(parsed.skillDirs)
-        ? parsed.skillDirs.filter((entry): entry is string => typeof entry === "string")
-        : [],
-      unsupported: Array.isArray(parsed.unsupported)
-        ? parsed.unsupported.filter(isUnsupportedEntry)
-        : [],
-      tools: Array.isArray(parsed.tools) ? parsed.tools.filter(isNativeToolEntry) : [],
-      commands: Array.isArray(parsed.commands) ? parsed.commands.filter(isCommandEntry) : [],
-      cliCommands: Array.isArray(parsed.cliCommands)
-        ? parsed.cliCommands.filter(isCommandEntry)
-        : [],
-      outputStyles: Array.isArray(parsed.outputStyles)
-        ? parsed.outputStyles.filter(isOutputStyleEntry)
-        : [],
-    };
+    parsed = JSON.parse(fs.readFileSync(registryPath(root), "utf8"));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-    return {
-      generatedAt: "",
-      installDir: "",
-      skillDirs: [],
-      unsupported: [],
-      tools: [],
-      commands: [],
-      cliCommands: [],
-      outputStyles: [],
-    };
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+  return {
+    generatedAt: typeof parsed.generatedAt === "string" ? parsed.generatedAt : "",
+    installDir: typeof parsed.installDir === "string" ? parsed.installDir : "",
+    skillDirs: validEntries(parsed.skillDirs, (entry) => typeof entry === "string"),
+    unsupported: validEntries(parsed.unsupported, isUnsupportedEntry),
+    tools: validEntries(parsed.tools, isNativeToolEntry),
+    commands: validEntries(parsed.commands, isCommandEntry),
+    cliCommands: validEntries(parsed.cliCommands, isCommandEntry),
+    outputStyles: validEntries(parsed.outputStyles, isOutputStyleEntry),
+  };
 }
 
 function isOutputStyleEntry(value: unknown): value is GeneratedOutputStyleEntry {

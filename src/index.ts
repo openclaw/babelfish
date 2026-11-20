@@ -24,6 +24,7 @@ import {
   NATIVE_BRIDGE_TOOL_NAMES,
   readGeneratedNativeToolRegistry,
   type GeneratedCommandEntry,
+  type GeneratedNativeToolRegistry,
   type GeneratedOutputStyleEntry,
   type NativeTool,
   type NativeToolContext,
@@ -359,8 +360,8 @@ function configurePromptHooks(api: OpenClawApi): void {
   };
 }
 
-function registerWarnings(api: OpenClawApi): void {
-  for (const warning of readGeneratedNativeToolRegistry().unsupported) {
+function registerWarnings(api: OpenClawApi, warnings: GeneratedNativeToolRegistry["unsupported"]): void {
+  for (const warning of warnings) {
     api.logger?.warn(
       `Babelfish plugin ${warning.plugin} (${warning.app}) has unsupported surface ${warning.surface}`,
     );
@@ -803,14 +804,15 @@ export default {
   description: "Use plugins from supported coding and agent apps in OpenClaw.",
   register(api: OpenClawApi): void {
     registerBabelfishCli(api);
-    registerHermesCliCommands(api);
+    const registry = readGeneratedNativeToolRegistry();
+    registerHermesCliCommands(api, registry.cliCommands);
     if (api.registrationMode === "cli-metadata") return;
 
     configurePromptHooks(api);
-    registerNativeTools(api);
-    registerHermesCommands(api);
-    registerOutputStyles(api);
-    registerWarnings(api);
+    registerNativeTools(api, registry.tools);
+    registerHermesCommands(api, registry.commands);
+    registerOutputStyles(api, registry.outputStyles);
+    registerWarnings(api, registry.unsupported);
     registerToolHooks(api);
     registerRunHooks(api);
     registerSessionHooks(api);
