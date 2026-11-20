@@ -54,6 +54,7 @@ type OpenClawCliProgram = {
   command(name: string): OpenClawCliCommand;
 };
 type OpenClawApi = {
+  registrationMode?: string;
   config?: {
     plugins?: {
       entries?: Record<string, {
@@ -110,6 +111,7 @@ const UNSUPPORTED_WARNING_HOOKS = new Set([
   "kanban_task_completed",
   "kanban_task_blocked",
   "transform_llm_output",
+  "transform_terminal_output",
 ]);
 
 const UNSUPPORTED_WARNING_MIDDLEWARE = new Set([
@@ -117,7 +119,7 @@ const UNSUPPORTED_WARNING_MIDDLEWARE = new Set([
   "tool_execution",
 ]);
 
-const config = resolveConfig(undefined);
+const config = resolveConfig();
 const sessionStartContext = new Map<string, string[]>();
 const sessionStartPending = new Map<string, Promise<void>>();
 const sessionStartOwners = new Map<string, symbol>();
@@ -267,10 +269,6 @@ async function invokeMiddleware(kind: string, event: unknown, ctx: unknown) {
 
 function firstRecord(results: unknown[]): Record<string, unknown> | undefined {
   return results.map(record).find((item) => Object.keys(item).length > 0);
-}
-
-function firstString(results: unknown[]): string | undefined {
-  return results.find((item): item is string => typeof item === "string" && item.length > 0);
 }
 
 function promptMutation(value: unknown): Record<string, string> | undefined {
@@ -441,15 +439,13 @@ function registerToolHooks(api: OpenClawApi): void {
 
   api.registerAgentToolResultMiddleware(
     async (event, ctx) => {
-      const [toolResult, terminalResult] = await Promise.all([
-        invokeHook("transform_tool_result", event, ctx),
-        invokeHook("transform_terminal_output", event, ctx),
-      ]);
-      const transformed = firstString([
-        ...toolResult.results,
-        ...terminalResult.results,
-      ]);
-      return transformed ? { result: textResult(transformed) } : undefined;
+      const hook = await invokeHook("transform_tool_result", {
+        ...event,
+        result: stringifyResult(event.result),
+        task_id: sessionKey(event, ctx) ?? "",
+      }, ctx);
+      const replacement = hook.results.find((value): value is string => typeof value === "string");
+      return replacement === undefined ? undefined : { result: textResult(replacement) };
     },
     { runtimes: ["openclaw", "codex"] },
   );
@@ -807,13 +803,15 @@ export default {
   name: "Babelfish",
   description: "Use plugins from supported coding and agent apps in OpenClaw.",
   register(api: OpenClawApi): void {
-    configurePromptHooks(api);
-    const registry = readGeneratedNativeToolRegistry();
-    registerNativeTools(api, registry.tools);
     registerBabelfishCli(api);
+    const registry = readGeneratedNativeToolRegistry();
+    registerHermesCliCommands(api, registry.cliCommands);
+    if (api.registrationMode === "cli-metadata") return;
+
+    configurePromptHooks(api);
+    registerNativeTools(api, registry.tools);
     registerHermesCommands(api, registry.commands);
     registerOutputStyles(api, registry.outputStyles);
-    registerHermesCliCommands(api, registry.cliCommands);
     registerWarnings(api, registry.unsupported);
     registerToolHooks(api);
     registerRunHooks(api);
