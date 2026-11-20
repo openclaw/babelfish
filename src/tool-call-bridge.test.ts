@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { hookTestApi } from "../test/hook-api.js";
 
 const failureSources = {
   import: "raise RuntimeError('import failed')\n",
@@ -38,12 +39,7 @@ describe("Hermes decision-provider availability", () => {
         vi.resetModules();
         const entry = (await import("./index.js")).default;
         const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
-        entry.register({
-          logger: { warn: () => undefined },
-          on: (name, handler) => { hooks.set(name, handler); },
-          registerTool: () => undefined, registerCommand: () => undefined,
-          registerCli: () => undefined, registerAgentToolResultMiddleware: () => undefined,
-        });
+        entry.register(hookTestApi(hooks));
         const session = { sessionId: `session-${kind}` };
         const { releaseHermesBridge } = await import("./hermes-python.js");
         const { resolveConfig } = await import("./config.js");
@@ -63,7 +59,48 @@ describe("Hermes decision-provider availability", () => {
     15_000,
   );
 
-  it("still reports observer callback failures without discarding later observer results", async () => {
+  it("maps Hermes tool result strings through the registered host middleware", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-result-"));
+    const installDir = path.join(root, "hermes");
+    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
+    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", installDir);
+    const session = { sessionId: "result-session" };
+    const event = { toolName: "echo", args: {}, result: { content: [{ type: "text", text: "original" }] } };
+    vi.resetModules();
+    const { releaseHermesBridge } = await import("./hermes-python.js");
+    const { resolveConfig } = await import("./config.js");
+    try {
+      await writePlugin(installDir, "results", [
+        "import json",
+        "def transform(tool_name, args, result, task_id):",
+        "    if tool_name == 'echo' and task_id == 'result-session':",
+        "        return args.get('replacement', json.loads(result)['content'][0]['text'])",
+        "def register(ctx):",
+        "    ctx.register_hook('transform_tool_result', transform)",
+        "    ctx.register_hook('transform_terminal_output', lambda **kwargs: 'wrong surface')",
+      ].join("\n"));
+      const entry = (await import("./index.js")).default;
+      const registerMiddleware = vi.fn();
+      const warn = vi.fn();
+      entry.register({
+        on: () => undefined, registerTool: () => undefined, registerCommand: () => undefined,
+        registerCli: () => undefined, registerAgentToolResultMiddleware: registerMiddleware, logger: { warn },
+      });
+      const [[transform]] = registerMiddleware.mock.calls;
+      await expect(transform(event, session)).resolves.toEqual({ result: event.result });
+      await expect(transform({ ...event, args: { replacement: "" } }, session)).resolves.toEqual({
+        result: { content: [{ type: "text", text: "" }] },
+      });
+      await expect(transform({ ...event, toolName: "other" }, session)).resolves.toBeUndefined();
+      await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining("unsupported hook transform_terminal_output")));
+    } finally {
+      releaseHermesBridge(resolveConfig(), session);
+      vi.unstubAllEnvs();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("continues to later hook and request middleware callbacks after an observer fails", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-observer-"));
     // This checks observer results, not Python's cold-start latency.
     const config = { rootDir: root, installDir: root, python: "python3", timeoutMs: 10000, env: {} };
@@ -76,14 +113,14 @@ describe("Hermes decision-provider availability", () => {
         "        raise RuntimeError('observer failed')",
         "    ctx.register_hook('post_tool_call', fail)",
         "    ctx.register_hook('post_tool_call', lambda **kwargs: 'later hook')",
-        "    ctx.register_middleware('tool_result', fail)",
-        "    ctx.register_middleware('tool_result', lambda **kwargs: 'later middleware')",
+        "    ctx.register_middleware('llm_request', fail)",
+        "    ctx.register_middleware('llm_request', lambda request: {'request': {**request, 'model': 'later'}})",
         "",
       ].join("\n"));
       await expect(invokeHermesHook(config, { hook: "post_tool_call", kwargs: {}, context: session }))
         .resolves.toMatchObject({ results: ["later hook"] });
-      await expect(invokeHermesMiddleware(config, { kind: "tool_result", kwargs: {}, context: session }))
-        .resolves.toMatchObject({ results: ["later middleware"] });
+      await expect(invokeHermesMiddleware(config, { kind: "llm_request", kwargs: { request: {} }, context: session }))
+        .resolves.toMatchObject({ results: [{ request: { model: "later" } }] });
     } finally {
       releaseHermesBridge(config, session);
       await fs.rm(root, { recursive: true, force: true });

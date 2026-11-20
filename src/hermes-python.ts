@@ -104,47 +104,32 @@ export type HermesRuntimeContext = {
   env?: Record<string, string>;
 };
 
-type BridgeRequest =
-  | { op: "list"; installDir: string }
-  | {
-      op: "call";
-      installDir: string;
-      plugin?: string;
-      tool: string;
-      args: unknown;
-      context?: HermesRuntimeContext;
-    }
-  | {
-      op: "command";
-      installDir: string;
-      plugin?: string;
-      command: string;
-      args: unknown;
-      context?: HermesRuntimeContext;
-    }
-  | {
-      op: "cliCommand";
-      installDir: string;
-      plugin?: string;
-      command: string;
-      args: string[];
-      context?: HermesRuntimeContext;
-    }
-  | { op: "skill"; installDir: string; plugin?: string; skill: string }
-  | {
-      op: "hook";
-      installDir: string;
-      hook: string;
-      kwargs: Record<string, unknown>;
-      context?: HermesRuntimeContext;
-    }
-  | {
-      op: "middleware";
-      installDir: string;
-      kind: string;
-      kwargs: Record<string, unknown>;
-      context?: HermesRuntimeContext;
-    };
+type ToolParams = {
+  plugin?: string;
+  tool: string;
+  args: unknown;
+  context?: HermesRuntimeContext;
+};
+type CommandParams<Args = unknown> = {
+  plugin?: string;
+  command: string;
+  args: Args;
+  context?: HermesRuntimeContext;
+};
+type SkillParams = { plugin?: string; skill: string };
+type EventParams = { kwargs: Record<string, unknown>; context?: HermesRuntimeContext };
+type HookParams = EventParams & { hook: string };
+type MiddlewareParams = EventParams & { kind: string };
+
+type BridgeOperation =
+  | { op: "list" }
+  | ({ op: "call" } & ToolParams)
+  | ({ op: "command" } & CommandParams)
+  | ({ op: "cliCommand" } & CommandParams<string[]>)
+  | ({ op: "skill" } & SkillParams)
+  | ({ op: "hook" } & HookParams)
+  | ({ op: "middleware" } & MiddlewareParams);
+type BridgeRequest = BridgeOperation & { installDir: string };
 
 type PendingRequest = {
   resolve(value: unknown): void;
@@ -171,10 +156,7 @@ class BridgeProcess {
   }
 
   request<T>(request: BridgeRequest, options: { signal?: AbortSignal }): Promise<T> {
-    const result = this.queue.then(
-      () => this.execute<T>(request, options),
-      () => this.execute<T>(request, options),
-    );
+    const result = this.queue.then(() => this.execute<T>(request, options));
     this.queue = result.then(
       () => undefined,
       () => undefined,
@@ -227,16 +209,9 @@ class BridgeProcess {
       env: { ...process.env, ...this.config.env },
       stdio: ["pipe", "pipe", "pipe"],
     });
-    let exitSettled = false;
     let settleExit!: () => void;
     this.childExit = new Promise<void>((resolve) => {
-      settleExit = () => {
-        if (exitSettled) {
-          return;
-        }
-        exitSettled = true;
-        resolve();
-      };
+      settleExit = resolve;
     });
     child.unref();
     (child.stdin as unknown as UnrefHandle).unref();
@@ -318,7 +293,7 @@ function requestLane(request: BridgeRequest): string {
   if (!("context" in request) || !request.context) {
     return "global";
   }
-  return request.context.sessionKey ?? request.context.sessionId ?? request.context.agentId ?? "global";
+  return contextLane(request.context) ?? "global";
 }
 
 function contextLane(context: HermesRuntimeContext): string | undefined {
@@ -334,26 +309,21 @@ export type HermesHelperOptions = {
 
 function runHelper<T>(
   config: HermesBridgeConfig,
-  request: BridgeRequest,
+  operation: BridgeOperation,
   options: HermesHelperOptions = {},
 ): Promise<T> {
+  const request = { ...operation, installDir: config.installDir };
   if (options.isolated) {
     const bridge = new BridgeProcess(config);
     if (options.waitForExit) {
       const result = bridge.request<T>(request, options);
-      const occupancy = result
-        .then(
-          () => undefined,
-          () => undefined,
-        )
-        .finally(async () => {
-          bridge.reset();
-          await bridge.waitForExit();
-        })
-        .then(
-          () => undefined,
-          () => undefined,
-        );
+      const occupancy = result.finally(() => {
+        bridge.reset();
+        return bridge.waitForExit();
+      }).then(
+        () => undefined,
+        () => undefined,
+      );
       options.onOccupancy?.(occupancy);
       return result;
     }
@@ -399,7 +369,7 @@ async function isEmptyInstallation(installDir: string): Promise<boolean> {
 }
 
 export function listHermesPlugins(config: HermesBridgeConfig): Promise<HermesListResult> {
-  return runHelper(config, { op: "list", installDir: config.installDir }, { isolated: true });
+  return runHelper(config, { op: "list" }, { isolated: true });
 }
 
 export function releaseHermesBridge(
@@ -417,83 +387,45 @@ export function releaseHermesBridge(
 
 export function callHermesTool(
   config: HermesBridgeConfig,
-  params: { plugin?: string; tool: string; args: unknown; context?: HermesRuntimeContext },
+  { plugin, tool, args, context }: ToolParams,
   options?: HermesHelperOptions,
 ): Promise<HermesCallResult> {
-  return runHelper(config, {
-    op: "call",
-    installDir: config.installDir,
-    plugin: params.plugin,
-    tool: params.tool,
-    args: params.args,
-    context: params.context,
-  }, options);
+  return runHelper(config, { op: "call", plugin, tool, args, context }, options);
 }
 
 export function callHermesCommand(
   config: HermesBridgeConfig,
-  params: { plugin?: string; command: string; args: unknown; context?: HermesRuntimeContext },
+  { plugin, command, args, context }: CommandParams,
   options?: HermesHelperOptions,
 ): Promise<HermesCommandResult> {
-  return runHelper(config, {
-    op: "command",
-    installDir: config.installDir,
-    plugin: params.plugin,
-    command: params.command,
-    args: params.args,
-    context: params.context,
-  }, options);
+  return runHelper(config, { op: "command", plugin, command, args, context }, options);
 }
 
 export function callHermesCliCommand(
   config: HermesBridgeConfig,
-  params: { plugin?: string; command: string; args: string[]; context?: HermesRuntimeContext },
+  { plugin, command, args, context }: CommandParams<string[]>,
   options?: { signal?: AbortSignal },
 ): Promise<HermesCommandResult> {
-  return runHelper(config, {
-    op: "cliCommand",
-    installDir: config.installDir,
-    plugin: params.plugin,
-    command: params.command,
-    args: params.args,
-    context: params.context,
-  }, options);
+  return runHelper(config, { op: "cliCommand", plugin, command, args, context }, options);
 }
 
 export function readHermesSkill(
   config: HermesBridgeConfig,
-  params: { plugin?: string; skill: string },
+  { plugin, skill }: SkillParams,
 ): Promise<HermesSkillResult> {
-  return runHelper(config, {
-    op: "skill",
-    installDir: config.installDir,
-    plugin: params.plugin,
-    skill: params.skill,
-  });
+  return runHelper(config, { op: "skill", plugin, skill });
 }
 
 export function invokeHermesHook(
   config: HermesBridgeConfig,
-  params: { hook: string; kwargs: Record<string, unknown>; context?: HermesRuntimeContext },
+  { hook, kwargs, context }: HookParams,
 ): Promise<HermesHookResult> {
-  return runHelper(config, {
-    op: "hook",
-    installDir: config.installDir,
-    hook: params.hook,
-    kwargs: params.kwargs,
-    context: params.context,
-  });
+  return runHelper(config, { op: "hook", hook, kwargs, context });
 }
 
 export function invokeHermesMiddleware(
   config: HermesBridgeConfig,
-  params: { kind: string; kwargs: Record<string, unknown>; context?: HermesRuntimeContext },
+  { kind, kwargs, context }: MiddlewareParams,
 ): Promise<HermesMiddlewareResult> {
-  return runHelper(config, {
-    op: "middleware",
-    installDir: config.installDir,
-    kind: params.kind,
-    kwargs: params.kwargs,
-    context: params.context,
-  });
+  return runHelper(config, { op: "middleware", kind, kwargs, context });
 }

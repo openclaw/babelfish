@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import { asObject, stringifyResult } from "./json.js";
 import { appendMonitorContext, createMonitorOutputReader, MAX_MONITOR_OUTPUT_BYTES } from "./monitor-output.js";
 import { resolveConfig } from "./config.js";
 import {
@@ -108,6 +109,7 @@ const UNSUPPORTED_WARNING_HOOKS = new Set([
   "kanban_task_completed",
   "kanban_task_blocked",
   "transform_llm_output",
+  "transform_terminal_output",
 ]);
 
 const UNSUPPORTED_WARNING_MIDDLEWARE = new Set([
@@ -126,9 +128,7 @@ const monitorProcesses = new Map<string, ChildProcess[]>();
 const monitorContext = new Map<string, string[]>();
 
 function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return asObject(value) ?? {};
 }
 
 function snakeCase(value: string): string {
@@ -269,10 +269,6 @@ function firstRecord(results: unknown[]): Record<string, unknown> | undefined {
   return results.map(record).find((item) => Object.keys(item).length > 0);
 }
 
-function firstString(results: unknown[]): string | undefined {
-  return results.find((item): item is string => typeof item === "string" && item.length > 0);
-}
-
 function promptMutation(value: unknown): Record<string, string> | undefined {
   const request = record(record(value).request);
   const fields = {
@@ -290,10 +286,6 @@ function promptMutation(value: unknown): Record<string, string> | undefined {
 
 function textResult(text: string): Record<string, unknown> {
   return { content: [{ type: "text", text }] };
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
 
 function bundlePayload(eventName: string, event: unknown, ctx: unknown): Record<string, unknown> {
@@ -445,15 +437,13 @@ function registerToolHooks(api: OpenClawApi): void {
 
   api.registerAgentToolResultMiddleware(
     async (event, ctx) => {
-      const [toolResult, terminalResult] = await Promise.all([
-        invokeHook("transform_tool_result", event, ctx),
-        invokeHook("transform_terminal_output", event, ctx),
-      ]);
-      const transformed = firstString([
-        ...toolResult.results,
-        ...terminalResult.results,
-      ]);
-      return transformed ? { result: textResult(transformed) } : undefined;
+      const hook = await invokeHook("transform_tool_result", {
+        ...event,
+        result: text(event.result),
+        task_id: sessionKey(event, ctx) ?? "",
+      }, ctx);
+      const replacement = hook.results.find((value): value is string => typeof value === "string");
+      return replacement === undefined ? undefined : { result: textResult(replacement) };
     },
     { runtimes: ["openclaw", "codex"] },
   );
@@ -480,7 +470,7 @@ export function registerHermesCommands(api: OpenClawApi, generated?: GeneratedCo
           args: ctx.args ?? "",
           context: context(ctx),
         });
-        return { text: text(result.result) };
+        return { text: stringifyResult(result.result) };
       },
     });
   }
@@ -534,7 +524,7 @@ export function registerHermesCliCommands(
               process.stderr.write(result.stderr);
             }
             if (result.result !== null && result.result !== undefined) {
-              const output = text(result.result);
+              const output = stringifyResult(result.result);
               console.log(output);
             }
           });
