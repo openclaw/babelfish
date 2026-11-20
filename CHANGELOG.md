@@ -4,6 +4,8 @@
 
 - Check the package on Node.js 26 in Linux CI and honor the selected npm cache during offline consumer validation.
 
+- Reuse Hermes plugin discovery when generating tools and skills during an install or uninstall.
+
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
 - Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log.
