@@ -24,11 +24,18 @@ describe("bounded monitor output", () => {
     reader.end();
     expect(lines).toEqual(["one", "two", "é", "final"]);
     expect(overflow).not.toHaveBeenCalled();
-    const oversized = createMonitorOutputReader(() => undefined, overflow);
-    oversized.write(Buffer.from("é".repeat(MAX_MONITOR_OUTPUT_BYTES / 2)));
+    const lengths: number[] = [];
+    const oversized = createMonitorOutputReader((line) => lengths.push(Buffer.byteLength(line)), overflow);
+    const chunk = Buffer.from("é".repeat(512));
+    for (let i = 0; i < MAX_MONITOR_OUTPUT_BYTES / chunk.length; i++) oversized.write(chunk);
+    oversized.write(Buffer.from("\n"));
+    expect(lengths).toEqual([MAX_MONITOR_OUTPUT_BYTES]);
+    oversized.write(Buffer.alloc(MAX_MONITOR_OUTPUT_BYTES - 1, 65));
+    oversized.write(Buffer.from([0xc3]));
     expect(overflow).not.toHaveBeenCalled();
-    oversized.write(Buffer.from("é"));
-    expect(overflow).toHaveBeenCalledTimes(1);
+    oversized.end(); // An incomplete UTF-8 sequence decodes to a three-byte replacement character.
+    expect(overflow).toHaveBeenCalledOnce();
+    expect(lengths).toEqual([MAX_MONITOR_OUTPUT_BYTES]);
   });
 
   it("bounds retained context without capping lifetime output", () => {
