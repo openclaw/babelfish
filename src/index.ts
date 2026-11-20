@@ -439,7 +439,7 @@ function registerToolHooks(api: OpenClawApi): void {
     async (event, ctx) => {
       const hook = await invokeHook("transform_tool_result", {
         ...event,
-        result: text(event.result),
+        result: stringifyResult(event.result),
         task_id: sessionKey(event, ctx) ?? "",
       }, ctx);
       const replacement = hook.results.find((value): value is string => typeof value === "string");
