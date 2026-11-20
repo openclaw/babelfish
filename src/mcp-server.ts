@@ -1,11 +1,5 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  type CallToolResult,
-  type Tool,
-} from "@modelcontextprotocol/sdk/types.js";
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { asObject, stringifyResult } from "./json.js";
 import { namedHermesTools } from "./hermes-tools.js";
 import { sanitizeName, uniqueName } from "./tool-names.js";
@@ -188,7 +182,11 @@ export function buildHermesMcpToolIndex(list: HermesListResult): HermesMcpToolIn
   return { tools: [...commands.tools, ...tools], toolRoutes, commandRoutes: commands.routes };
 }
 
-export function createHermesMcpServer(config: HermesBridgeConfig): Server {
+export async function createHermesMcpServer(config: HermesBridgeConfig): Promise<Server> {
+  const [{ Server }, { CallToolRequestSchema, ListToolsRequestSchema }] = await Promise.all([
+    import("@modelcontextprotocol/sdk/server/index.js"),
+    import("@modelcontextprotocol/sdk/types.js"),
+  ]);
   const server = new Server(
     { name: "babelfish", version: "0.1.2" },
     {
@@ -356,6 +354,7 @@ export function createHermesMcpServer(config: HermesBridgeConfig): Server {
 
 export async function startHermesMcpServer(config: HermesBridgeConfig): Promise<void> {
   await syncHermesSkills(config);
-  const server = createHermesMcpServer(config);
+  const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
+  const server = await createHermesMcpServer(config);
   await server.connect(new StdioServerTransport());
 }

@@ -105,6 +105,10 @@ if (process.argv[2] !== "--worker") {
   const run = (command, args, cwd = consumer) => execFileSync(command, args, { cwd, env: process.env, encoding: "utf8", timeout: 120_000, maxBuffer: 4 * 1024 * 1024, shell: process.platform === "win32" && command.endsWith(".cmd") });
   const bin = path.join(consumer, "node_modules", ".bin", process.platform === "win32" ? "babelfish.cmd" : "babelfish");
   const cli = (args) => JSON.parse(run(bin, args));
+  // Put a copy outside the installed dependencies to catch eager SDK imports.
+  const standalone = path.join(process.env.TMPDIR, "help-probe.mjs");
+  await fs.copyFile(path.join(installed, "dist", "bin.js"), standalone);
+  assert.match(run(process.execPath, [standalone, "--help"]), /install.*<app>/s);
   assert.match(run(bin, ["--help"]), /install.*<app>/s);
   const write = async (root, relative, contents) => {
     await fs.mkdir(path.dirname(path.join(root, relative)), { recursive: true });

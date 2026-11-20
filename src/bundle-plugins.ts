@@ -1,9 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { asObject, type JsonObject } from "./json.js";
 import type { BabelfishConfig, SupportedApp } from "./config.js";
 import { appInstallDir } from "./config.js";
@@ -575,6 +572,12 @@ async function withTimeout<T>(run: Promise<T>, timeoutMs: number, onTimeout: () 
 }
 
 async function clientFor(plugin: BundlePlugin, server: BundleServer, timeoutMs: number): Promise<Client> {
+  const [{ Client }, { SSEClientTransport }, { StdioClientTransport }, { StreamableHTTPClientTransport }] = await Promise.all([
+    import("@modelcontextprotocol/sdk/client/index.js"),
+    import("@modelcontextprotocol/sdk/client/sse.js"),
+    import("@modelcontextprotocol/sdk/client/stdio.js"),
+    import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
+  ]);
   const client = new Client({ name: "babelfish", version: "0.1.2" });
   const raw = server.config;
   const url = typeof raw.url === "string" ? expandRoot(raw.url, plugin.path) : undefined;
