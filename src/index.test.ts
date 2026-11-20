@@ -36,6 +36,52 @@ async function writeNodeMonitor(root: string, script: string, ...args: string[])
 }
 
 describe("native OpenClaw hook entry", () => {
+  it("inserts literal event data in prompt hooks and releases their deadlines", async () => {
+    const root = await tempDir("babelfish-prompt-evaluation-");
+    const manifestDir = path.join(root, "claude-code", "prompts", ".claude-plugin");
+    await fs.mkdir(manifestDir, { recursive: true });
+    await fs.writeFile(path.join(manifestDir, "plugin.json"), JSON.stringify({
+      hooks: { Stop: [{ hooks: [{ type: "prompt", prompt: "[$ARGUMENTS,$ARGUMENTS]", timeout: 37 }] }] },
+    }));
+    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
+    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "hermes"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const scheduled = vi.spyOn(globalThis, "setTimeout");
+    const cleared = vi.spyOn(globalThis, "clearTimeout");
+    const complete = vi.fn(async (_params: { messages: { content: string }[] }) => ({ text: '{"ok":true}' }));
+    try {
+      vi.resetModules();
+      const entry = (await import("./index.js")).default;
+      const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+      entry.register({
+        ...hookTestApi(hooks),
+        config: { plugins: { entries: { babelfish: { llm: { allowAgentIdOverride: true, allowModelOverride: true } } } } },
+        runtime: { llm: { complete } },
+      });
+      const stop = hooks.get("before_agent_finalize")!;
+      const value = "$& $$ $` $'";
+      const context = { agentId: "agent", modelId: "model" };
+      await stop({ value }, context);
+      const prompt = complete.mock.calls[0][0].messages[0].content;
+      expect(JSON.parse(prompt)).toEqual([expect.objectContaining({ value }), expect.objectContaining({ value })]);
+
+      await stop({}, {});
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("requires active OpenClaw agent and model context"));
+      expect(complete).toHaveBeenCalledOnce();
+      complete.mockImplementationOnce(() => { throw new Error("host failed"); });
+      await stop({}, context);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("host failed"));
+      const deadlines = scheduled.mock.results.filter((_, index) => scheduled.mock.calls[index][1] === 37_000);
+      expect(deadlines).toHaveLength(2);
+      for (const timer of deadlines) expect(cleared).toHaveBeenCalledWith(timer.value);
+    } finally {
+      scheduled.mockRestore();
+      cleared.mockRestore();
+      warn.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("keeps imported guards active when Hermes is empty and Python is missing", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-no-hermes-"));
     const plugin = path.join(root, "codex", "guard");

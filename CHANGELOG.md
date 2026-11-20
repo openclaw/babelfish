@@ -8,6 +8,8 @@
 
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
+- Preserve literal event data in Claude prompt-hook templates and clear evaluation timers when the host fails.
+
 - Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log.
 
 - Load the MCP SDK when a client or server starts, reducing startup time for everyday CLI commands and plugin registration.
