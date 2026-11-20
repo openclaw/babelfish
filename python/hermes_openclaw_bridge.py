@@ -384,45 +384,35 @@ def _load_plugin(plugin_dir: Path) -> tuple[dict[str, Any], RecordingContext]:
     return loaded
 
 
+def _plugin_summary(plugin_dir: Path, manifest: dict[str, Any], ctx: RecordingContext) -> dict[str, Any]:
+    return {
+        "key": plugin_dir.name,
+        "name": str(manifest.get("name") or plugin_dir.name),
+        "version": str(manifest.get("version") or ""),
+        "description": str(manifest.get("description") or ""),
+        "path": str(plugin_dir),
+        "tools": [tool.summary() for tool in ctx.tools],
+        "hooks": sorted({hook.name for hook in ctx.hooks}),
+        "middleware": sorted({middleware.kind for middleware in ctx.middleware}),
+        "commands": sorted([command.summary() for command in ctx.commands], key=lambda item: item["name"]),
+        "cliCommands": sorted([command.summary() for command in ctx.cli_commands], key=lambda item: item["name"]),
+        "skills": sorted([skill.summary() for skill in ctx.skills], key=lambda item: item["name"]),
+        "auxiliaryTasks": sorted(
+            [task.summary() for task in ctx.auxiliary_tasks],
+            key=lambda item: item["key"],
+        ),
+        "unsupported": sorted(set(ctx.unsupported)),
+    }
+
+
 def _summarize_plugin(plugin_dir: Path) -> dict[str, Any]:
     try:
         manifest, ctx = _load_plugin(plugin_dir)
-        return {
-            "key": plugin_dir.name,
-            "name": str(manifest.get("name") or plugin_dir.name),
-            "version": str(manifest.get("version") or ""),
-            "description": str(manifest.get("description") or ""),
-            "path": str(plugin_dir),
-            "tools": [tool.summary() for tool in ctx.tools],
-            "hooks": sorted({hook.name for hook in ctx.hooks}),
-            "middleware": sorted({middleware.kind for middleware in ctx.middleware}),
-            "commands": sorted([command.summary() for command in ctx.commands], key=lambda item: item["name"]),
-            "cliCommands": sorted([command.summary() for command in ctx.cli_commands], key=lambda item: item["name"]),
-            "skills": sorted([skill.summary() for skill in ctx.skills], key=lambda item: item["name"]),
-            "auxiliaryTasks": sorted(
-                [task.summary() for task in ctx.auxiliary_tasks],
-                key=lambda item: item["key"],
-            ),
-            "unsupported": sorted(set(ctx.unsupported)),
-        }
+        return _plugin_summary(plugin_dir, manifest, ctx)
     except Exception as exc:
         manifest = _load_yaml(plugin_dir / "plugin.yaml")
-        return {
-            "key": plugin_dir.name,
-            "name": str(manifest.get("name") or plugin_dir.name),
-            "version": str(manifest.get("version") or ""),
-            "description": str(manifest.get("description") or ""),
-            "path": str(plugin_dir),
-            "tools": [],
-            "hooks": [],
-            "middleware": [],
-            "commands": [],
-            "cliCommands": [],
-            "skills": [],
-            "auxiliaryTasks": [],
-            "unsupported": [],
-            "error": f"{type(exc).__name__}: {exc}",
-        }
+        empty = RecordingContext(manifest, plugin_dir.name, plugin_dir)
+        return {**_plugin_summary(plugin_dir, manifest, empty), "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _list(payload: dict[str, Any]) -> dict[str, Any]:

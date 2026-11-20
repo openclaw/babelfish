@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { onTestFinished } from "vitest";
-import { copyFixture } from "../test/hermes-fixtures.js";
+import { copyFixture, pluginSummary } from "../test/hermes-fixtures.js";
 import {
   callHermesCliCommand,
   callHermesCommand,
@@ -173,6 +173,24 @@ describe("Hermes Python bridge", () => {
       releaseHermesBridge(config, context);
       await fs.rm(installDir, { recursive: true, force: true });
     }
+  });
+
+  it.each([
+    ["raise ValueError('stopped')", "ValueError: stopped"],
+    ["ctx.tools.append(None)", "AttributeError: 'NoneType' object has no attribute 'summary'"],
+  ])("reports manifest metadata and discards partial registrations on failure: %s", async (statement, error) => {
+    const installDir = await tempInstallDir();
+    const plugin = path.join(installDir, "broken");
+    await fs.mkdir(plugin);
+    await fs.writeFile(path.join(plugin, "plugin.yaml"), "name: Display Name\nversion: 2\ndescription: fixture\n");
+    await fs.writeFile(path.join(plugin, "__init__.py"), [
+      "def register(ctx):", "    ctx.register_hook('post_tool_call', lambda: None)", `    ${statement}`,
+    ].join("\n"));
+    const { plugins } = await listHermesPlugins({ installDir, python: "python3", timeoutMs: 10000, env: {} });
+    expect(plugins).toEqual([{
+      ...pluginSummary("broken", []), name: "Display Name", version: "2",
+      description: "fixture", path: await fs.realpath(plugin), error,
+    }]);
   });
 
   it("lists and calls a Hermes register(ctx) tool", async () => {
