@@ -330,10 +330,8 @@ function configurePromptHooks(api: OpenClawApi): void {
   promptHookEvaluator = async (template, payload, timeoutMs) => {
     const argumentsJson = JSON.stringify(payload);
     const prompt = template.includes("$ARGUMENTS")
-      ? template.replaceAll("$ARGUMENTS", argumentsJson)
+      ? template.replaceAll("$ARGUMENTS", () => argumentsJson)
       : `${template}\n\n${argumentsJson}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const model = typeof payload.model === "string" && payload.model ? payload.model : undefined;
     const agentId = typeof payload.agent_id === "string" && payload.agent_id
       ? payload.agent_id
@@ -341,16 +339,23 @@ function configurePromptHooks(api: OpenClawApi): void {
     if (!model || !agentId) {
       throw new Error("Prompt hook requires active OpenClaw agent and model context");
     }
-    const response = await api.runtime!.llm!.complete({
-      messages: [{ role: "user", content: prompt }],
-      maxTokens: 300,
-      temperature: 0,
-      systemPrompt: 'Evaluate the hook instructions. Return only JSON: {"ok":true} to allow, or {"ok":false,"reason":"..."} to block.',
-      purpose: "babelfish-hook-evaluation",
-      signal: controller.signal,
-      model,
-      agentId,
-    }).finally(() => clearTimeout(timer));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    try {
+      response = await api.runtime!.llm!.complete({
+        messages: [{ role: "user", content: prompt }],
+        maxTokens: 300,
+        temperature: 0,
+        systemPrompt: 'Evaluate the hook instructions. Return only JSON: {"ok":true} to allow, or {"ok":false,"reason":"..."} to block.',
+        purpose: "babelfish-hook-evaluation",
+        signal: controller.signal,
+        model,
+        agentId,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
     const match = response.text.match(/\{[\s\S]*\}/);
     const decision = match ? record(JSON.parse(match[0])) : {};
     if (decision.ok === true) return undefined;
