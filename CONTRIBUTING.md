@@ -15,7 +15,7 @@ boundaries, so contributions should include focused compatibility evidence.
 
 Prerequisites:
 
-- Node.js 22.19 or newer.
+- The Node.js version pinned in [`.nvmrc`](.nvmrc).
 - npm.
 - Git.
 - OpenSSH `ssh-keygen` for release-signature tests.

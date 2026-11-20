@@ -42,9 +42,15 @@ const MAX_FINISHED_TASKS = 100;
 export const MAX_RUNNING_TASKS = 8;
 let nextTaskId = 1;
 
-function runningTaskCount(): number {
-  // Isolated children stay alive until wait/exit; status can be stopped sooner.
-  return occupyingTasks.size;
+function structuredResult(value: unknown): CallToolResult {
+  return {
+    content: [{ type: "text", text: stringifyResult(value) }],
+    structuredContent: asObject(value),
+  };
+}
+
+function toolError(text: string): CallToolResult {
+  return { isError: true, content: [{ type: "text", text }] };
 }
 
 function trimFinishedTasks(): void {
@@ -209,24 +215,17 @@ export async function createHermesMcpServer(config: HermesBridgeConfig): Promise
 
     if (request.params.name === "babelfish_task_start") {
       const args = asObject(request.params.arguments) ?? {};
-      const kind = args.kind === "command" ? "command" : "tool";
-      if (args.kind !== "tool" && args.kind !== "command") {
-        return { isError: true, content: [{ type: "text", text: "kind must be tool or command" }] };
+      const kind = args.kind;
+      if (kind !== "tool" && kind !== "command") {
+        return toolError("kind must be tool or command");
       }
       const name = typeof args.name === "string" ? args.name.trim() : "";
       if (!name) {
-        return { isError: true, content: [{ type: "text", text: "name is required" }] };
+        return toolError("name is required");
       }
-      if (runningTaskCount() >= MAX_RUNNING_TASKS) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: `Too many running Babelfish tasks (max ${MAX_RUNNING_TASKS})`,
-            },
-          ],
-        };
+      // Stopped tasks still occupy a slot until their isolated child exits.
+      if (occupyingTasks.size >= MAX_RUNNING_TASKS) {
+        return toolError(`Too many running Babelfish tasks (max ${MAX_RUNNING_TASKS})`);
       }
       const id = `hermes-task-${nextTaskId++}`;
       const startedAt = Date.now();
@@ -242,26 +241,11 @@ export async function createHermesMcpServer(config: HermesBridgeConfig): Promise
           occupancy = promise;
         },
       };
+      const plugin = typeof args.plugin === "string" ? args.plugin : undefined;
       const run =
         kind === "command"
-          ? callHermesCommand(
-              config,
-              {
-                plugin: typeof args.plugin === "string" ? args.plugin : undefined,
-                command: name,
-                args: args.args ?? "",
-              },
-              helperOptions,
-            )
-          : callHermesTool(
-              config,
-              {
-                plugin: typeof args.plugin === "string" ? args.plugin : undefined,
-                tool: name,
-                args: args.args ?? {},
-              },
-              helperOptions,
-            );
+          ? callHermesCommand(config, { plugin, command: name, args: args.args ?? "" }, helperOptions)
+          : callHermesTool(config, { plugin, tool: name, args: args.args ?? {} }, helperOptions);
       void run
         .then(
           (result) => {
@@ -289,44 +273,29 @@ export async function createHermesMcpServer(config: HermesBridgeConfig): Promise
           occupyingTasks.delete(id);
         })
         .catch(() => undefined);
-      return {
-        content: [{ type: "text", text: stringifyResult({ id, status: "running" }) }],
-        structuredContent: { id, status: "running" },
-      };
+      return structuredResult({ id, status: "running" });
     }
 
-    if (request.params.name === "babelfish_task_status") {
+    if (request.params.name === "babelfish_task_status" || request.params.name === "babelfish_task_stop") {
       const id = String(asObject(request.params.arguments)?.id ?? "");
       const task = tasks.get(id);
       if (!task) {
-        return { isError: true, content: [{ type: "text", text: `Unknown Babelfish task: ${id}` }] };
+        return toolError(`Unknown Babelfish task: ${id}`);
       }
-      const { controller: _controller, ...safeTask } =
-        task.status === "running" ? task : { ...task, controller: undefined };
-      if (task.status !== "running") {
-        tasks.delete(id);
-      }
-      return {
-        content: [{ type: "text", text: stringifyResult(safeTask) }],
-        structuredContent: asObject(safeTask),
-      };
-    }
-
-    if (request.params.name === "babelfish_task_stop") {
-      const id = String(asObject(request.params.arguments)?.id ?? "");
-      const task = tasks.get(id);
-      if (!task) {
-        return { isError: true, content: [{ type: "text", text: `Unknown Babelfish task: ${id}` }] };
+      if (request.params.name === "babelfish_task_stop") {
+        if (task.status === "running") {
+          task.controller.abort();
+          tasks.set(id, { id, status: "stopped", startedAt: task.startedAt, finishedAt: Date.now() });
+          trimFinishedTasks();
+        }
+        return structuredResult(tasks.get(id));
       }
       if (task.status === "running") {
-        task.controller.abort();
-        tasks.set(id, { id, status: "stopped", startedAt: task.startedAt, finishedAt: Date.now() });
-        trimFinishedTasks();
+        const { controller: _controller, ...safeTask } = task;
+        return structuredResult(safeTask);
       }
-      return {
-        content: [{ type: "text", text: stringifyResult(tasks.get(id)) }],
-        structuredContent: asObject(tasks.get(id)),
-      };
+      tasks.delete(id);
+      return structuredResult(task);
     }
 
     const list = await listHermesPlugins(config);
@@ -343,8 +312,7 @@ export async function createHermesMcpServer(config: HermesBridgeConfig): Promise
         { isolated: true },
       );
       return {
-        content: [{ type: "text", text: stringifyResult(result.result) }],
-        structuredContent: asObject(result.result),
+        ...structuredResult(result.result),
         _meta: {
           "babelfish/app": "hermes",
           "babelfish/plugin": result.plugin,
@@ -355,10 +323,7 @@ export async function createHermesMcpServer(config: HermesBridgeConfig): Promise
 
     const route = index.toolRoutes.get(request.params.name);
     if (!route) {
-      return {
-        isError: true,
-        content: [{ type: "text", text: `Unknown Babelfish MCP tool: ${request.params.name}` }],
-      };
+      return toolError(`Unknown Babelfish MCP tool: ${request.params.name}`);
     }
 
     try {
@@ -372,13 +337,7 @@ export async function createHermesMcpServer(config: HermesBridgeConfig): Promise
         { isolated: true },
       );
       return {
-        content: [
-          {
-            type: "text",
-            text: stringifyResult(result.parsedResult ?? result.result),
-          },
-        ],
-        structuredContent: asObject(result.parsedResult ?? result.result),
+        ...structuredResult(result.parsedResult ?? result.result),
         _meta: {
           "babelfish/app": "hermes",
           "babelfish/plugin": result.plugin,
@@ -386,10 +345,7 @@ export async function createHermesMcpServer(config: HermesBridgeConfig): Promise
         },
       };
     } catch (error) {
-      return {
-        isError: true,
-        content: [{ type: "text", text: (error as Error).message }],
-      };
+      return toolError((error as Error).message);
     }
   });
 

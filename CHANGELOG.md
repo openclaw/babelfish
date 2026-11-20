@@ -2,15 +2,21 @@
 
 ## Unreleased
 
-- Load the MCP SDK when a client or server starts, reducing startup time for everyday CLI commands and plugin registration.
+- Check the package on Node.js 26 in Linux CI and honor the selected npm cache during offline consumer validation.
 
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
+
+- Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log.
+
+- Load the MCP SDK when a client or server starts, reducing startup time for everyday CLI commands and plugin registration.
 
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.
 
 - Update the Vitest test runner to 5.1.1.
 
 - Refresh Vitest to 5.1.0 and CodeQL to 4.39.3, and patch transitive Hono vulnerabilities while retaining Node.js 22.19 support. Thanks @dependabot! #64 #65
+
+- Run the platform test matrix without repeating fresh package installs when only source test files change.
 
 - Skip platform and constrained-memory CI for changes limited to contributor guidance and issue or PR templates.
 

@@ -64,25 +64,31 @@ export async function runBabelfishCli(args: string[]): Promise<void> {
     return;
   }
 
+  if (command !== "install" && command !== "uninstall") {
+    throw new Error(usage());
+  }
+  const app = requireApp(args[1]);
+  const target = args[2];
+  if (!target || target.startsWith("--")) {
+    throw new Error(usage());
+  }
+  let generated: Awaited<ReturnType<typeof regenerateNativeTools>> | undefined;
+  const options = {
+    installDir: appInstallDir(config, app),
+    afterChange: async () => {
+      generated = await regenerateNativeTools(config);
+    },
+  };
   if (command === "install") {
-    const app = requireApp(args[1]);
-    const source = args[2];
-    if (!source || source.startsWith("--")) {
-      throw new Error(usage());
-    }
-    let generated: Awaited<ReturnType<typeof regenerateNativeTools>> | undefined;
     const result = await installPlugin({
-      installDir: appInstallDir(config, app),
-      source,
+      ...options,
+      source: target,
       name: readOptionValue(args, "--name"),
       force: args.includes("--force"),
       timeoutMs: readCloneTimeoutMs(args),
       validate: app === "hermes"
         ? validateHermesPluginDirectory
         : (target) => validateBundlePluginDirectory(app, target),
-      afterChange: async () => {
-        generated = await regenerateNativeTools(config);
-      },
     });
     const plugin = app === "hermes"
       ? undefined
@@ -91,23 +97,6 @@ export async function runBabelfishCli(args: string[]): Promise<void> {
     return;
   }
 
-  if (command === "uninstall") {
-    const app = requireApp(args[1]);
-    const name = args[2];
-    if (!name || name.startsWith("--")) {
-      throw new Error(usage());
-    }
-    let generated: Awaited<ReturnType<typeof regenerateNativeTools>> | undefined;
-    const result = await uninstallPlugin({
-      installDir: appInstallDir(config, app),
-      name,
-      afterChange: async () => {
-        generated = await regenerateNativeTools(config);
-      },
-    });
-    console.log(JSON.stringify({ app, removed: result, ...generated }, null, 2));
-    return;
-  }
-
-  throw new Error(usage());
+  const result = await uninstallPlugin({ ...options, name: target });
+  console.log(JSON.stringify({ app, removed: result, ...generated }, null, 2));
 }

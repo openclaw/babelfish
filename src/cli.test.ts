@@ -1,16 +1,13 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import { commitFixture, stalledGitRemote } from "../test/git-fixtures.js";
 import { runBabelfishCli } from "./cli.js";
 
 vi.mock("./native-tools.js", () => ({
   regenerateNativeTools: vi.fn(async () => ({ restartRequired: true })),
 }));
 
-const execFileAsync = promisify(execFile);
 let root: string;
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-cli-"));
@@ -61,41 +58,28 @@ describe("babelfish install clone timeout", () => {
     const source = path.join(root, "source");
     await fs.mkdir(path.join(source, ".codex-plugin"), { recursive: true });
     await fs.writeFile(path.join(source, ".codex-plugin", "plugin.json"), "{}");
-    await execFileAsync("git", ["-C", source, "init", "-q"]);
-    await execFileAsync("git", ["-C", source, "add", "."]);
-    await execFileAsync("git", ["-C", source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"]);
+    await commitFixture(source);
     vi.stubEnv("OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS", "invalid");
     await runBabelfishCli([
       "install", "codex", source, "--name", "ok-plugin",
       "--clone-timeout-ms", "1", "--clone-timeout-ms", "30000",
     ]);
-    await expect(fs.access(path.join(root, "apps", "codex", "ok-plugin", ".codex-plugin", "plugin.json")))
-      .resolves.toBeUndefined();
+    const installed = path.join(root, "apps", "codex", "ok-plugin");
+    await expect(fs.access(path.join(installed, ".codex-plugin", "plugin.json"))).resolves.toBeUndefined();
+    await runBabelfishCli(["uninstall", "codex", "ok-plugin"]);
+    await expect(fs.access(installed)).rejects.toMatchObject({ code: "ENOENT" });
   }, 15_000);
 
   it.each(["flag", "environment"])("honors the %s timeout and closes the stalled Git transport", async (override) => {
     const timeoutMs = process.platform === "win32" ? 10_000 : 2_000;
-    const sockets: net.Socket[] = [];
-    const server = net.createServer((socket) => {
-      sockets.push(socket);
-      socket.on("error", (error: NodeJS.ErrnoException) => expect(error.code).toBe("ECONNRESET"));
-      socket.resume();
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const { port } = server.address() as net.AddressInfo;
-    try {
-      const flags = override === "flag" ? ["--clone-timeout-ms", String(timeoutMs)] : [];
-      if (override === "environment") vi.stubEnv("OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS", String(timeoutMs));
-      await expect(runBabelfishCli([
-        "install", "codex", `http://127.0.0.1:${port}/stalled-plugin.git`,
-        "--name", "stalled", ...flags,
-      ])).rejects.toThrow(`Git clone timed out after ${timeoutMs}ms`);
-      expect(sockets.length).toBeGreaterThan(0);
-      await vi.waitFor(() => expect(sockets.every((socket) => socket.destroyed)).toBe(true));
-      expect(await fs.readdir(path.join(root, "apps", "codex"))).toEqual([]);
-    } finally {
-      for (const socket of sockets) socket.destroy();
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-    }
+    const remote = await stalledGitRemote();
+    const flags = override === "flag" ? ["--clone-timeout-ms", String(timeoutMs)] : [];
+    if (override === "environment") vi.stubEnv("OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS", String(timeoutMs));
+    await expect(runBabelfishCli([
+      "install", "codex", remote.url,
+      "--name", "stalled", ...flags,
+    ])).rejects.toThrow(`Git clone timed out after ${timeoutMs}ms`);
+    await remote.expectDisconnected();
+    expect(await fs.readdir(path.join(root, "apps", "codex"))).toEqual([]);
   }, 20_000);
 });
