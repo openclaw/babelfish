@@ -45,6 +45,8 @@
 
 - Report Hermes command handler failures as MCP tool errors and reject unknown tool names with the JSON-RPC invalid-params code.
 
+- Reject malformed install options before cloning so `--force` cannot silently replace a plugin under its source name.
+
 ## 0.1.2 — 2026-10-17
 
 **Highlights:** Preserve literal shell values and installed deny guards; security hardening bounds retained monitor output to prevent unbounded memory growth.
