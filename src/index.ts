@@ -50,6 +50,7 @@ type OpenClawCliCommand = {
   allowUnknownOption(value?: boolean): OpenClawCliCommand;
   action(handler: (args?: string[]) => unknown): OpenClawCliCommand;
 };
+type CliDescriptor = { name: string; description: string; hasSubcommands: boolean };
 type OpenClawCliProgram = {
   command(name: string): OpenClawCliCommand;
 };
@@ -99,7 +100,7 @@ type OpenClawApi = {
     registrar: (ctx: { program: OpenClawCliProgram }) => void,
     options: {
       commands: string[];
-      descriptors: Array<{ name: string; description: string; hasSubcommands: boolean }>;
+      descriptors: CliDescriptor[];
     },
   ): void;
 };
@@ -496,48 +497,44 @@ export function registerOutputStyles(api: OpenClawApi, generated?: GeneratedOutp
   }
 }
 
+function registerCliCommand(
+  api: OpenClawApi,
+  descriptor: CliDescriptor,
+  argsHint: string,
+  action: (args: string[]) => Promise<void>,
+): void {
+  api.registerCli(
+    ({ program }) => {
+      program.command(descriptor.name)
+        .description(descriptor.description)
+        .argument("[args...]", argsHint)
+        .allowUnknownOption(true)
+        .action((args = []) => action(args));
+    },
+    { commands: [descriptor.name], descriptors: [descriptor] },
+  );
+}
+
 export function registerHermesCliCommands(
   api: OpenClawApi,
   generated?: GeneratedCommandEntry[],
 ): void {
   const entries = generated ?? readGeneratedNativeToolRegistry().cliCommands;
-  if (entries.length === 0) {
-    return;
-  }
   for (const entry of entries) {
-    api.registerCli(
-      ({ program }) => {
-        program
-          .command(entry.name)
-          .description(entry.description)
-          .argument("[args...]", entry.argsHint || "Arguments passed to the imported CLI command.")
-          .allowUnknownOption(true)
-          .action(async (args = []) => {
-            const result = await callHermesCliCommand(config, {
-              plugin: entry.plugin,
-              command: entry.originalName,
-              args,
-              context: { workspace: process.cwd(), env: {} },
-            });
-            if (result.stdout) {
-              process.stdout.write(result.stdout);
-            }
-            if (result.stderr) {
-              process.stderr.write(result.stderr);
-            }
-            if (result.result !== null && result.result !== undefined) {
-              const output = stringifyResult(result.result);
-              console.log(output);
-            }
-          });
-      },
-      {
-        commands: [entry.name],
-        descriptors: [{
-        name: entry.name,
-        description: entry.description,
-        hasSubcommands: false,
-        }],
+    registerCliCommand(
+      api,
+      { name: entry.name, description: entry.description, hasSubcommands: false },
+      entry.argsHint || "Arguments passed to the imported CLI command.",
+      async (args) => {
+        const result = await callHermesCliCommand(config, {
+          plugin: entry.plugin,
+          command: entry.originalName,
+          args,
+          context: { workspace: process.cwd(), env: {} },
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        if (result.result !== null && result.result !== undefined) console.log(stringifyResult(result.result));
       },
     );
   }
@@ -662,21 +659,11 @@ function registerRunHooks(api: OpenClawApi): void {
 }
 
 export function registerBabelfishCli(api: OpenClawApi): void {
-  api.registerCli(
-    ({ program }) => {
-      program
-        .command("babelfish")
-        .description("Manage imported app plugins.")
-        .argument("[args...]", "Babelfish command and arguments.")
-        .allowUnknownOption(true)
-        .action(async (args = []) => runBabelfishCli(args));
-    },
-    {
-      commands: ["babelfish"],
-      descriptors: [
-        { name: "babelfish", description: "Manage imported app plugins.", hasSubcommands: true },
-      ],
-    },
+  registerCliCommand(
+    api,
+    { name: "babelfish", description: "Manage imported app plugins.", hasSubcommands: true },
+    "Babelfish command and arguments.",
+    runBabelfishCli,
   );
 }
 
