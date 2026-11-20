@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { installTiming } from "./install-timing.js";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -451,6 +452,7 @@ export async function regenerateNativeTools(
 ): Promise<{ generatedTools: string[]; restartRequired: true }> {
   const root = options.root ?? packageRoot;
   const list = await listHermesPlugins(config);
+  installTiming("Hermes discovery completed");
   const failures = list.plugins.filter((plugin) => plugin.error);
   if (failures.length > 0) {
     throw new Error(
@@ -461,6 +463,7 @@ export async function regenerateNativeTools(
   }
   const tools = buildNativeToolEntries(list);
   const bundlePlugins = await listBundlePlugins(config);
+  installTiming("bundle discovery completed");
   tools.push(...await buildBundleToolEntries(bundlePlugins, tools.map((tool) => tool.name), config.timeoutMs));
   const commands = buildCommandEntries(list, (plugin) => plugin.commands, OPENCLAW_RESERVED_COMMANDS);
   const cliCommands = buildCommandEntries(list, (plugin) => plugin.cliCommands ?? [], OPENCLAW_CLI_ROOTS);
@@ -500,6 +503,7 @@ export async function regenerateNativeTools(
   }
   try {
     const manifestSkillDirs = await syncBundleSkills(bundlePlugins, root);
+    installTiming("bundle skills completed");
     await fsp.writeFile(registryTarget, `${JSON.stringify(registry, null, 2)}\n`);
     await writeManifest(
       [...NATIVE_BRIDGE_TOOL_NAMES, ...tools.map((tool) => tool.name)],
@@ -507,6 +511,7 @@ export async function regenerateNativeTools(
       root,
     );
     await syncHermesSkills(config, root, list);
+    installTiming("Hermes skills completed");
   } catch (error) {
     await restoreFile(registryTarget, previousRegistry);
     await restoreFile(manifestTarget, previousManifest);

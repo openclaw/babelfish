@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { installTiming } from "./install-timing.js";
 import path from "node:path";
 import { spawnShellCommand, terminateShellProcessTree } from "./shell-command.js";
 
@@ -169,8 +170,11 @@ export async function installPlugin({
   const backup = path.join(stagingRoot, "old");
 
   try {
+    installTiming("launch clone");
     await cloneRepository(source, staged, timeoutMs);
+    installTiming("clone completed");
     await validate?.(staged);
+    installTiming("validation completed");
     if (replacing) {
       await fs.rename(target, backup);
     }
@@ -183,7 +187,9 @@ export async function installPlugin({
       throw error;
     }
     try {
+      installTiming("regeneration started");
       await afterChange?.();
+      installTiming("regeneration completed");
     } catch (error) {
       await fs.rm(target, { recursive: true, force: true });
       if (replacing) {

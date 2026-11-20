@@ -141,7 +141,22 @@ if (process.argv[2] !== "--worker") {
   reportPhase("prepare Git fixtures");
   const names = { hermes: "hermes-consumer", "claude-code": "claude-consumer", codex: "codex-consumer" };
   for (const app of Object.keys(names)) {
-    cli(["install", app, path.join(sources, app), "--name", names[app]]);
+    const trace = path.join(process.env.TMPDIR, `git-${app}.jsonl`);
+    const start = Date.now();
+    process.env.BABELFISH_BENCH_INSTALL_START = String(start);
+    process.env.GIT_TRACE2_EVENT = trace;
+    try {
+      cli(["install", app, path.join(sources, app), "--name", names[app]]);
+    } finally {
+      delete process.env.GIT_TRACE2_EVENT;
+      delete process.env.BABELFISH_BENCH_INSTALL_START;
+    }
+    const events = (await fs.readFile(trace, "utf8")).trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    const sid = events.find((event) => event.event === "cmd_name" && event.name === "clone").sid;
+    const gitStart = events.find((event) => event.sid === sid && event.event === "version");
+    const gitExit = events.find((event) => event.sid === sid && event.event === "exit");
+    console.error(`[install timing] ${app} Git first event at ${Date.parse(gitStart.time) - start} ms, Git process ${Math.round(gitExit.t_abs * 1000)} ms`);
+    await fs.rm(trace);
     reportPhase(`install ${app} fixture`);
   }
   const list = () => {
