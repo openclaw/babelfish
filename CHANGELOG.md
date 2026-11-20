@@ -14,6 +14,8 @@
 
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.
 
+- Install the package consumer's isolated TypeScript toolchain from a lockfile in CI and the constrained-memory image.
+
 - Update the Vitest test runner to 5.1.1.
 
 - Refresh Vitest to 5.1.0 and CodeQL to 4.39.3, and patch transitive Hono vulnerabilities while retaining Node.js 22.19 support. Thanks @dependabot! #64 #65

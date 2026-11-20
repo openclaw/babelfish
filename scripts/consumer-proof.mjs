@@ -9,10 +9,9 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageName = "@openclaw/babelfish";
-const compilerVersion = "7.0.2";
-const nodeTypesVersion = "26.6.3";
 const script = fileURLToPath(import.meta.url);
 const packageRoot = path.resolve(path.dirname(script), "..");
+const toolFixture = path.join(packageRoot, "test", "consumer-tools");
 
 let phaseStart = performance.now();
 function reportPhase(name) {
@@ -57,8 +56,10 @@ if (process.argv[2] !== "--worker") {
     const tools = process.env.BABELFISH_CONSUMER_TOOLS || path.join(root, "tools");
     if (!runtimeOnly && !process.env.BABELFISH_CONSUMER_TOOLS) {
       await fs.mkdir(tools);
-      await fs.writeFile(path.join(tools, "package.json"), '{"private":true}\n');
-      run(npm, ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact", `typescript@${compilerVersion}`, `@types/node@${nodeTypesVersion}`], tools);
+      for (const file of ["package.json", "package-lock.json"]) {
+        await fs.copyFile(path.join(toolFixture, file), path.join(tools, file));
+      }
+      run(npm, ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], tools);
       reportPhase("install type tools");
     }
     const consumer = path.join(root, "consumer");
@@ -254,7 +255,8 @@ if (process.argv[2] !== "--worker") {
   }
   reportPhase("MCP and plugin runtime");
   if (tools) {
-    for (const [name, version] of [["typescript", compilerVersion], ["@types/node", nodeTypesVersion]]) {
+    const { dependencies } = await json(path.join(toolFixture, "package.json"));
+    for (const [name, version] of Object.entries(dependencies)) {
       assert.equal((await json(path.join(tools, "node_modules", name, "package.json"))).version, version, "separate pinned type toolchain");
     }
     await write(consumer, "probe.mts", 'import plugin, { registerNativeTools } from "@openclaw/babelfish";\nconst registration: typeof plugin.register = plugin.register;\nvoid registration; void registerNativeTools;\n');
