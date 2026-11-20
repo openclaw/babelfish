@@ -2,7 +2,16 @@ name: CI
 
 on:
   pull_request:
+    paths-ignore: &contributor_metadata
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/pull_request_template.md"
+      - "AGENTS.md"
+      - "CODE_OF_CONDUCT.md"
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "SUPPORT.md"
   push:
+    paths-ignore: *contributor_metadata
     branches:
       - main
   workflow_dispatch:
