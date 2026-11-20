@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { uniqueName } from "./tool-names.js";
 import type { HermesBridgeConfig } from "./config.js";
 import { listHermesPlugins, readHermesSkill } from "./hermes-python.js";
 
@@ -54,11 +55,7 @@ export async function syncHermesSkills(
         continue;
       }
       const baseName = `babelfish-${slug(plugin.key)}-${slug(skill.name)}`;
-      let name = baseName;
-      for (let index = 2; desired.has(name); index += 1) {
-        name = `${baseName}-${index}`;
-      }
-      desired.add(name);
+      const name = uniqueName(baseName, desired, "-");
       const loaded = await readHermesSkill(config, { plugin: plugin.key, skill: skill.name });
       const dir = path.join(generatedRoot, name);
       await fs.mkdir(dir, { recursive: true });

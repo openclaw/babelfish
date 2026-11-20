@@ -4,6 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { asObject, type JsonObject } from "./json.js";
 import type { BabelfishConfig, SupportedApp } from "./config.js";
 import { appInstallDir } from "./config.js";
 import { readFrontmatterScalar, splitFrontmatter } from "./markdown.js";
@@ -12,8 +13,6 @@ import {
   spawnShellCommand,
   terminateShellProcessTree,
 } from "./shell-command.js";
-
-type JsonObject = Record<string, unknown>;
 
 const SUPPORTED_HOOK_EVENTS = new Set([
   "PreToolUse",
@@ -84,12 +83,6 @@ export type BundlePlugin = {
   unsupported: string[];
 };
 
-function object(value: unknown): JsonObject | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonObject)
-    : undefined;
-}
-
 function strings(value: unknown): string[] {
   if (typeof value === "string") {
     return value.trim() ? [value.trim()] : [];
@@ -100,14 +93,7 @@ function strings(value: unknown): string[] {
 }
 
 async function readJson(target: string): Promise<JsonObject | undefined> {
-  try {
-    return object(JSON.parse(await fs.readFile(target, "utf8")));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return undefined;
-    }
-    throw new Error(`Could not parse ${target}: ${(error as Error).message}`);
-  }
+  return asObject(await readJsonValue(target));
 }
 
 async function readJsonValue(target: string): Promise<unknown> {
@@ -155,18 +141,18 @@ async function readOutputStyles(root: string, candidates: string[]): Promise<Bun
 }
 
 async function readMonitors(root: string, manifest: JsonObject): Promise<{ monitors: BundleMonitor[]; unsupported: string[] }> {
-  const experimental = object(manifest.experimental);
+  const experimental = asObject(manifest.experimental);
   const declared = experimental?.monitors;
   let entries: unknown[] = Array.isArray(declared) ? declared : [];
   if (typeof declared === "string" || declared === undefined) {
     const file = typeof declared === "string" ? declared : "monitors/monitors.json";
     const raw = await readJsonValue(underRoot(root, file));
-    entries = Array.isArray(raw) ? raw : Array.isArray(object(raw)?.monitors) ? object(raw)?.monitors as unknown[] : [];
+    entries = Array.isArray(raw) ? raw : Array.isArray(asObject(raw)?.monitors) ? asObject(raw)?.monitors as unknown[] : [];
   }
   const monitors: BundleMonitor[] = [];
   const unsupported: string[] = [];
   for (const value of entries) {
-    const entry = object(value);
+    const entry = asObject(value);
     if (!entry || typeof entry.name !== "string" || typeof entry.command !== "string") {
       unsupported.push("invalid monitor");
       continue;
@@ -222,31 +208,22 @@ async function readServers(root: string, files: string[]): Promise<BundleServer[
   const servers: BundleServer[] = [];
   for (const file of files) {
     const target = underRoot(root, file);
-    const raw = await readJson(target);
-    if (!raw) {
-      continue;
-    }
-    const map = object(raw.mcpServers) ?? raw;
-    for (const [name, config] of Object.entries(map)) {
-      const normalized = object(config);
-      if (normalized) {
-        servers.push({ name, config: normalized, baseDir: path.dirname(target) });
-      }
-    }
+    const declared = serverEntries(await readJson(target), path.dirname(target));
+    for (const server of declared) servers.push(server);
   }
   return servers;
 }
 
-function inlineServers(value: unknown): BundleServer[] {
-  const map = object(value);
+function serverEntries(value: unknown, baseDir: string): BundleServer[] {
+  const map = asObject(value);
   if (!map) {
     return [];
   }
   const servers: BundleServer[] = [];
-  for (const [name, config] of Object.entries(object(map.mcpServers) ?? map)) {
-    const normalized = object(config);
+  for (const [name, config] of Object.entries(asObject(map.mcpServers) ?? map)) {
+    const normalized = asObject(config);
     if (normalized) {
-      servers.push({ name, config: normalized, baseDir: "" });
+      servers.push({ name, config: normalized, baseDir });
     }
   }
   return servers;
@@ -304,10 +281,10 @@ function collectHooks(
       continue;
     }
     for (const group of groups) {
-      const matcherGroup = object(group);
+      const matcherGroup = asObject(group);
       const handlers = Array.isArray(matcherGroup?.hooks) ? matcherGroup.hooks : [group];
       for (const handler of handlers) {
-        const normalized = object(handler);
+        const normalized = asObject(handler);
         const hook = normalized && commandHook(app, normalized);
         if (!hook) {
           unsupported.push(`hook ${event} handler ${String(normalized?.type ?? "unknown")}`);
@@ -333,7 +310,7 @@ async function readHooks(
   const hooks: BundleHook[] = [];
   const unsupported: string[] = [];
   if (inline) {
-    collectHooks(app, object(inline.hooks) ?? inline, hooks, unsupported);
+    collectHooks(app, asObject(inline.hooks) ?? inline, hooks, unsupported);
   }
   const seen = new Set<string>();
   let remainingJsonFiles = MAX_HOOK_JSON_FILES;
@@ -342,7 +319,7 @@ async function readHooks(
     remainingJsonFiles -= discovered.length;
     for (const file of discovered) {
       const raw = await readJson(file);
-      const events = object(raw?.hooks) ?? raw;
+      const events = asObject(raw?.hooks) ?? raw;
       if (events) {
         collectHooks(app, events, hooks, unsupported);
       }
@@ -443,15 +420,12 @@ export async function inspectBundlePlugin(
   const outputStyleCandidates = app === "claude-code"
     ? relativePaths(manifest.outputStyles, ["output-styles"])
     : [];
-  const inlineMcp = inlineServers(manifest.mcpServers);
-  for (const server of inlineMcp) {
-    server.baseDir = root;
-  }
+  const inlineMcp = serverEntries(manifest.mcpServers, root);
   const declaredMcpFiles = strings(manifest.mcpServers);
   const mcpFiles = app === "codex" && declaredMcpFiles.length > 0
     ? declaredMcpFiles
     : [...new Set([".mcp.json", ...declaredMcpFiles])];
-  const inlineHooks = object(manifest.hooks);
+  const inlineHooks = asObject(manifest.hooks);
   const declaredHookPaths = strings(manifest.hooks);
   const hookPaths = app === "codex"
     ? declaredHookPaths.length > 0 || inlineHooks ? declaredHookPaths : ["hooks/hooks.json"]
@@ -559,7 +533,7 @@ function expandRoot(value: string, pluginRoot: string): string {
 }
 
 function serverEnv(config: JsonObject, pluginRoot: string): Record<string, string> {
-  const env = object(config.env) ?? {};
+  const env = asObject(config.env) ?? {};
   const merged: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     if (typeof value === "string") {
@@ -577,13 +551,13 @@ function serverEnv(config: JsonObject, pluginRoot: string): Record<string, strin
 function httpHeaders(config: JsonObject, pluginRoot: string): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(
-    object(config.headers) ?? object(config.http_headers ?? config.httpHeaders) ?? {},
+    asObject(config.headers) ?? asObject(config.http_headers ?? config.httpHeaders) ?? {},
   )) {
     if (typeof value === "string") {
       headers[key] = expandRoot(value, pluginRoot);
     }
   }
-  for (const [key, envName] of Object.entries(object(config.env_http_headers ?? config.envHttpHeaders) ?? {})) {
+  for (const [key, envName] of Object.entries(asObject(config.env_http_headers ?? config.envHttpHeaders) ?? {})) {
     if (typeof envName === "string" && process.env[envName]) {
       headers[key] = process.env[envName] as string;
     }
@@ -826,7 +800,7 @@ export async function invokeBundleHooks(
       const trimmed = output.stdout.trim();
       if (trimmed) {
         try {
-          const parsed = object(JSON.parse(trimmed));
+          const parsed = asObject(JSON.parse(trimmed));
           if (parsed) {
             results.push(parsed);
             const updatedInput = event === "PreToolUse" ? hookUpdatedInput(parsed) : undefined;
@@ -837,7 +811,7 @@ export async function invokeBundleHooks(
         } catch {
           const lastLine = trimmed.split("\n").at(-1);
           try {
-            const parsed = lastLine ? object(JSON.parse(lastLine)) : undefined;
+            const parsed = lastLine ? asObject(JSON.parse(lastLine)) : undefined;
             if (parsed) {
               results.push(parsed);
               const updatedInput = event === "PreToolUse" ? hookUpdatedInput(parsed) : undefined;
@@ -856,23 +830,23 @@ export async function invokeBundleHooks(
 }
 
 export function hookAdditionalContext(result: JsonObject): string | undefined {
-  const specific = object(result.hookSpecificOutput);
+  const specific = asObject(result.hookSpecificOutput);
   const value = specific?.additionalContext ?? result.systemMessage;
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 export function hookBlock(result: JsonObject): { block: boolean; reason?: string } {
-  const specific = object(result.hookSpecificOutput);
-  const permission = specific?.permissionDecision ?? object(specific?.decision)?.behavior;
+  const specific = asObject(result.hookSpecificOutput);
+  const permission = specific?.permissionDecision ?? asObject(specific?.decision)?.behavior;
   const blocked = result.continue === false || result.decision === "block" || permission === "deny";
-  const reason = specific?.permissionDecisionReason ?? object(specific?.decision)?.message
+  const reason = specific?.permissionDecisionReason ?? asObject(specific?.decision)?.message
     ?? result.stopReason ?? result.reason;
   return { block: blocked, reason: typeof reason === "string" ? reason : undefined };
 }
 
 export function hookUpdatedInput(result: JsonObject): JsonObject | undefined {
-  const specific = object(result.hookSpecificOutput);
-  return object(specific?.updatedInput) ?? object(specific?.updatedMCPToolInput);
+  const specific = asObject(result.hookSpecificOutput);
+  return asObject(specific?.updatedInput) ?? asObject(specific?.updatedMCPToolInput);
 }
 
 function requireShellVariables(command: string): void {
@@ -923,8 +897,6 @@ function runHookCommand(
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
     let settled = false;
     const finish = (
       error?: Error,
@@ -943,32 +915,23 @@ function runHookCommand(
         terminateShellProcessTree(child, process.platform, "SIGKILL");
       }, 250).unref();
     };
-    const capture = (stream: "stdout" | "stderr", chunks: Buffer[], chunk: Buffer) => {
-      if (settled) {
-        return;
-      }
-      if (stream === "stdout") {
-        stdoutBytes += chunk.length;
-        if (stdoutBytes <= MAX_HOOK_OUTPUT_BYTES) {
-          chunks.push(chunk);
-          return;
-        }
-      } else {
-        stderrBytes += chunk.length;
-        if (stderrBytes <= MAX_HOOK_OUTPUT_BYTES) {
-          chunks.push(chunk);
-          return;
-        }
-      }
-      terminate();
-      finish(new Error(`Hook ${stream} exceeded the ${MAX_HOOK_OUTPUT_BYTES}-byte output limit`));
-    };
     const timer = setTimeout(() => {
       terminate();
       finish(new Error(`Hook timed out after ${timeoutMs}ms`));
     }, timeoutMs);
-    child.stdout!.on("data", (chunk: Buffer) => capture("stdout", stdout, chunk));
-    child.stderr!.on("data", (chunk: Buffer) => capture("stderr", stderr, chunk));
+    for (const [stream, chunks] of [["stdout", stdout], ["stderr", stderr]] as const) {
+      let bytes = 0;
+      child[stream]!.on("data", (chunk: Buffer) => {
+        if (settled) return;
+        bytes += chunk.length;
+        if (bytes > MAX_HOOK_OUTPUT_BYTES) {
+          terminate();
+          finish(new Error(`Hook ${stream} exceeded the ${MAX_HOOK_OUTPUT_BYTES}-byte output limit`));
+          return;
+        }
+        chunks.push(chunk);
+      });
+    }
     child.stdin!.on("error", (error: NodeJS.ErrnoException) => {
       // Hooks can return a decision without consuming all of their input.
       if (error.code === "EPIPE" || error.code === "ECONNRESET" || error.code === "EOF") return;
