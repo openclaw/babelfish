@@ -294,6 +294,11 @@ describe("Hermes Python bridge", () => {
 
     const context = { sessionId: "stateful-session" };
     await invokeHermesHook(config, { hook: "on_session_start", kwargs: { value: "kept" }, context });
+    const controller = new AbortController();
+    await expect(callHermesTool(config, {
+      plugin: "simple", tool: "simple_echo", args: { value: 1n }, context,
+    }, { signal: controller.signal })).rejects.toThrow(TypeError);
+    controller.abort();
     await expect(
       callHermesTool(config, { plugin: "simple", tool: "simple_state", args: {}, context }),
     ).resolves.toMatchObject({ result: { state: "kept" } });

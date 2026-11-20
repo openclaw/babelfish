@@ -132,11 +132,9 @@ type BridgeOperation =
 type BridgeRequest = BridgeOperation & { installDir: string };
 
 type PendingRequest = {
+  requestId: number;
   resolve(value: unknown): void;
   reject(error: Error): void;
-  timer: NodeJS.Timeout;
-  signal?: AbortSignal;
-  abort?: () => void;
 };
 
 type BridgeResponse = { requestId: number; result?: unknown; error?: string };
@@ -145,7 +143,7 @@ type UnrefHandle = { unref(): void };
 class BridgeProcess {
   private child?: ChildProcessWithoutNullStreams;
   private nextRequestId = 1;
-  private pending = new Map<number, PendingRequest>();
+  private pending?: PendingRequest;
   private queue: Promise<void> = Promise.resolve();
   private childExit: Promise<void> = Promise.resolve();
 
@@ -187,18 +185,21 @@ class BridgeProcess {
     }
     const child = this.ensureChild();
     const requestId = this.nextRequestId++;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.stop(new Error(`Babelfish adapter timed out after ${this.config.timeoutMs}ms`));
-      }, this.config.timeoutMs);
-      const pending: PendingRequest = { resolve, reject, timer, signal: options.signal };
-      if (options.signal) {
-        pending.abort = () => this.stop(new Error("Babelfish adapter call cancelled"));
-        options.signal.addEventListener("abort", pending.abort, { once: true });
-      }
-      this.pending.set(requestId, pending);
-      child.stdin.write(`${JSON.stringify({ requestId, ...request })}\n`);
-    });
+    const cancel = () => this.stop(new Error("Babelfish adapter call cancelled"));
+    const timer = setTimeout(() => {
+      this.stop(new Error(`Babelfish adapter timed out after ${this.config.timeoutMs}ms`));
+    }, this.config.timeoutMs);
+    try {
+      return await new Promise<T>((resolve, reject) => {
+        this.pending = { requestId, resolve, reject };
+        options.signal?.addEventListener("abort", cancel, { once: true });
+        child.stdin.write(`${JSON.stringify({ requestId, ...request })}\n`);
+      });
+    } finally {
+      this.pending = undefined;
+      clearTimeout(timer);
+      options.signal?.removeEventListener("abort", cancel);
+    }
   }
 
   private ensureChild(): ChildProcessWithoutNullStreams {
@@ -251,12 +252,10 @@ class BridgeProcess {
       this.stop(new Error(`Babelfish adapter returned invalid JSON: ${(error as Error).message}`));
       return;
     }
-    const pending = this.pending.get(response.requestId);
-    if (!pending) {
+    const pending = this.pending;
+    if (pending?.requestId !== response.requestId) {
       return;
     }
-    this.pending.delete(response.requestId);
-    this.cleanupPending(pending);
     if (response.error) {
       pending.reject(new Error(response.error));
     } else {
@@ -264,22 +263,11 @@ class BridgeProcess {
     }
   }
 
-  private cleanupPending(pending: PendingRequest): void {
-    clearTimeout(pending.timer);
-    if (pending.signal && pending.abort) {
-      pending.signal.removeEventListener("abort", pending.abort);
-    }
-  }
-
   private stop(error: Error): void {
     const child = this.child;
     this.child = undefined;
     child?.kill("SIGTERM");
-    for (const pending of this.pending.values()) {
-      this.cleanupPending(pending);
-      pending.reject(error);
-    }
-    this.pending.clear();
+    this.pending?.reject(error);
   }
 }
 

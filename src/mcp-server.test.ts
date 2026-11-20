@@ -9,7 +9,7 @@ import { buildHermesMcpToolIndex, createHermesMcpServer, MAX_RUNNING_TASKS } fro
 import { buildNativeToolEntries } from "./native-tools.js";
 import * as hermesPython from "./hermes-python.js";
 
-async function connectTestClient(server: ReturnType<typeof createHermesMcpServer>): Promise<Client> {
+async function connectTestClient(server: Awaited<ReturnType<typeof createHermesMcpServer>>): Promise<Client> {
   const client = new Client({ name: "test", version: "0.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -184,7 +184,7 @@ describe("Hermes MCP server", () => {
       return untilAborted(options?.signal);
     });
 
-    const server = createHermesMcpServer({
+    const server = await createHermesMcpServer({
       installDir: await tempDir("openclaw-hermes-mcp-cap-"),
       python: "python3",
       timeoutMs: 10000,
@@ -269,7 +269,7 @@ describe("Hermes MCP server", () => {
       return untilAborted(options?.signal);
     });
 
-    const server = createHermesMcpServer({
+    const server = await createHermesMcpServer({
       installDir: await tempDir("openclaw-hermes-mcp-publish-"),
       python: "python3",
       timeoutMs: 10000,
@@ -350,7 +350,7 @@ describe("Hermes MCP server", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-task-capacity-"));
     const installDir = path.join(root, "plugins");
     await writeHoldPlugin(installDir);
-    const server = createHermesMcpServer({ installDir, rootDir: root, python: "python3", timeoutMs, env: {} });
+    const server = await createHermesMcpServer({ installDir, rootDir: root, python: "python3", timeoutMs, env: {} });
     const client = await connectTestClient(server);
     const ids: string[] = [];
     const pids: number[] = [];
@@ -497,7 +497,7 @@ describe("Hermes MCP server", () => {
       "def register(ctx):",
       "    ctx.register_command('run', command, 'Run a command')",
     ].join("\n"));
-    const server = createHermesMcpServer({ installDir, python: "python3", timeoutMs: 10_000, env: {} });
+    const server = await createHermesMcpServer({ installDir, python: "python3", timeoutMs: 10_000, env: {} });
     const client = await connectTestClient(server);
     try {
       const name = "babelfish_command__hermes__demo__run";
