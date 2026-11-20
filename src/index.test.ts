@@ -12,6 +12,26 @@ async function copyFixture(target: string): Promise<void> {
   await fs.cp(fixture, path.join(target, "simple"), { recursive: true });
 }
 
+async function writeNodeMonitor(root: string, script: string, ...args: string[]): Promise<void> {
+  const plugin = path.join(root, "claude-code", "monitor-plugin");
+  const installDir = path.join(root, "empty-hermes");
+  vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
+  vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", installDir);
+  await fs.mkdir(installDir, { recursive: true });
+  await fs.mkdir(path.join(plugin, ".claude-plugin"), { recursive: true });
+  await fs.mkdir(path.join(plugin, "monitors"), { recursive: true });
+  const scriptPath = path.join(plugin, "monitor.cjs");
+  await fs.writeFile(scriptPath, script);
+  const windows = process.platform === "win32";
+  const quote = (value: string) => windows ? `"${value.replaceAll('"', '""')}"` : JSON.stringify(value);
+  const launcher = windows ? 'node "%CLAUDE_PLUGIN_ROOT%\\monitor.cjs"' : `${quote(process.execPath)} ${quote(scriptPath)}`;
+  const command = [launcher, ...args.map(quote)].join(" ");
+  await fs.writeFile(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "monitor-plugin" }));
+  await fs.writeFile(path.join(plugin, "monitors", "monitors.json"), JSON.stringify([
+    { name: "status", description: "Status", command },
+  ]));
+}
+
 describe("native OpenClaw hook entry", () => {
   it("keeps imported guards active when Hermes is empty and Python is missing", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-no-hermes-"));
@@ -450,39 +470,16 @@ describe("native OpenClaw hook entry", () => {
     } finally {
       await hooks?.get("session_end")?.({ sessionId: "shell-monitor" }, { sessionId: "shell-monitor" });
       vi.unstubAllEnvs();
-      let removed = false;
-      for (let attempt = 0; attempt < 20 && !removed; attempt += 1) {
-        try {
-          await fs.rm(root, { recursive: true, force: true });
-          removed = true;
-        } catch (error) {
-          const code = (error as NodeJS.ErrnoException).code;
-          if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
-            throw error;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-      }
-      if (!removed) {
-        await fs.rm(root, { recursive: true, force: true });
-      }
-      await fs.rm(marker, { force: true });
+      await removeTemp(root);
     }
   }, 20_000);
 
   it("keeps monitor lines split across bytes, breaks, and end of output", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-monitor-lines-"));
-    const plugin = path.join(root, "claude-code", "monitor-plugin");
-    const scriptPath = path.join(plugin, "lines.cjs");
     const pidPath = path.join(root, "pid");
-    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
-    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "empty-hermes"));
     let hooks: Map<string, (event: unknown, ctx: unknown) => unknown> | undefined;
     try {
-      await fs.mkdir(path.join(root, "empty-hermes"), { recursive: true });
-      await fs.mkdir(path.join(plugin, ".claude-plugin"), { recursive: true });
-      await fs.mkdir(path.join(plugin, "monitors"), { recursive: true });
-      await fs.writeFile(scriptPath, `
+      await writeNodeMonitor(root, `
         const fs = require("node:fs");
         fs.writeFileSync(process.argv[2], String(process.pid));
         const out = process.stdout;
@@ -491,17 +488,7 @@ describe("native OpenClaw hook entry", () => {
         out.write(accent.subarray(0, 1));
         out.write(Buffer.concat([accent.subarray(1), Buffer.from("\\n")]));
         out.write(Buffer.from("final"));
-      `);
-      const quote = (value: string) => process.platform === "win32"
-        ? `"${value.replaceAll('"', '""')}"`
-        : JSON.stringify(value);
-      const command = process.platform === "win32"
-        ? `node "%CLAUDE_PLUGIN_ROOT%\\lines.cjs" ${quote(pidPath)}`
-        : `${quote(process.execPath)} ${quote(scriptPath)} ${quote(pidPath)}`;
-      await fs.writeFile(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "monitor-plugin" }));
-      await fs.writeFile(path.join(plugin, "monitors", "monitors.json"), JSON.stringify([
-        { name: "status", description: "Status", command },
-      ]));
+      `, pidPath);
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       hooks = new Map();
@@ -538,18 +525,12 @@ describe("native OpenClaw hook entry", () => {
 
   it("keeps a healthy monitor alive across consumed turns exceeding 1 MiB", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-monitor-turns-"));
-    const plugin = path.join(root, "claude-code", "monitor-plugin");
     const pidPath = path.join(root, "pid");
     const triggerPath = path.join(root, "next");
-    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
-    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "empty-hermes"));
     const warn = vi.fn();
     const hooks = new Map<string, (event: unknown, ctx: unknown) => unknown>();
     try {
-      await fs.mkdir(path.join(root, "empty-hermes"), { recursive: true });
-      await fs.mkdir(path.join(plugin, ".claude-plugin"), { recursive: true });
-      await fs.mkdir(path.join(plugin, "monitors"), { recursive: true });
-      await fs.writeFile(path.join(plugin, "turns.cjs"), `
+      await writeNodeMonitor(root, `
         const fs = require("node:fs");
         fs.writeFileSync(process.argv[2], String(process.pid));
         const emit = (turn) => {
@@ -560,13 +541,7 @@ describe("native OpenClaw hook entry", () => {
         const timer = setInterval(() => {
           if (fs.existsSync(process.argv[3])) { clearInterval(timer); emit(2); setInterval(() => {}, 1000); }
         }, 10);
-      `);
-      const quote = (value: string) => process.platform === "win32" ? `"${value.replaceAll('"', '""')}"` : JSON.stringify(value);
-      const command = process.platform === "win32"
-        ? `node "%CLAUDE_PLUGIN_ROOT%\\turns.cjs" ${quote(pidPath)} ${quote(triggerPath)}`
-        : `${quote(process.execPath)} ${quote(path.join(plugin, "turns.cjs"))} ${quote(pidPath)} ${quote(triggerPath)}`;
-      await fs.writeFile(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "monitor-plugin" }));
-      await fs.writeFile(path.join(plugin, "monitors", "monitors.json"), JSON.stringify([{ name: "status", description: "Status", command }]));
+      `, pidPath, triggerPath);
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       entry.register({
@@ -596,18 +571,11 @@ describe("native OpenClaw hook entry", () => {
 
   it("keeps a complete line in the chunk that crosses the output limit", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-monitor-prefix-"));
-    const plugin = path.join(root, "claude-code", "monitor-plugin");
-    const scriptPath = path.join(plugin, "prefix.cjs");
     const pidPath = path.join(root, "pid");
-    vi.stubEnv("OPENCLAW_BABELFISH_ROOT", root);
-    vi.stubEnv("OPENCLAW_BABELFISH_HERMES_PLUGIN_DIR", path.join(root, "empty-hermes"));
     const warn = vi.fn();
     let hooks: Map<string, (event: unknown, ctx: unknown) => unknown> | undefined;
     try {
-      await fs.mkdir(path.join(root, "empty-hermes"), { recursive: true });
-      await fs.mkdir(path.join(plugin, ".claude-plugin"), { recursive: true });
-      await fs.mkdir(path.join(plugin, "monitors"), { recursive: true });
-      await fs.writeFile(scriptPath, `
+      await writeNodeMonitor(root, `
         const fs = require("node:fs");
         fs.writeFileSync(process.argv[2], String(process.pid));
         process.stdout.write(Buffer.concat([
@@ -615,17 +583,7 @@ describe("native OpenClaw hook entry", () => {
           Buffer.alloc(${MAX_MONITOR_OUTPUT_BYTES + 1}, 0x41),
         ]));
         setInterval(() => {}, 1000);
-      `);
-      const quote = (value: string) => process.platform === "win32"
-        ? `"${value.replaceAll('"', '""')}"`
-        : JSON.stringify(value);
-      const command = process.platform === "win32"
-        ? `node "%CLAUDE_PLUGIN_ROOT%\\prefix.cjs" ${quote(pidPath)}`
-        : `${quote(process.execPath)} ${quote(scriptPath)} ${quote(pidPath)}`;
-      await fs.writeFile(path.join(plugin, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "monitor-plugin" }));
-      await fs.writeFile(path.join(plugin, "monitors", "monitors.json"), JSON.stringify([
-        { name: "status", description: "Status", command },
-      ]));
+      `, pidPath);
       vi.resetModules();
       const entry = (await import("./index.js")).default;
       hooks = new Map();
