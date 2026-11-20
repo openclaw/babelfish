@@ -1,15 +1,14 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { copyFixture, pluginSummary, toolSummary } from "../test/hermes-fixtures.js";
 import { buildNativeToolEntries, createNativeTools, normalizeMcpContent, regenerateNativeTools } from "./native-tools.js";
 
-const fixtureTimeoutMs = 15_000;
-
-async function copyFixture(target: string): Promise<void> {
-  const fixture = path.join(process.cwd(), "test/fixtures/simple-hermes-plugin");
-  await fs.cp(fixture, path.join(target, "simple"), { recursive: true });
+function sdkUrl(file: string): string {
+  return import.meta.resolve(`@modelcontextprotocol/sdk/${file}`);
 }
+
+const fixtureTimeoutMs = 15_000;
 
 async function writeCommandFixture(root: string, name: string): Promise<void> {
   const target = path.join(root, name);
@@ -37,8 +36,6 @@ describe("native generated tools", () => {
     const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-mcp-state-"));
     const plugin = path.join(stateRoot, "codex", "fixture");
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-package-"));
-    const sdk = path.join(process.cwd(), "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
-    const sdkUrl = (file: string) => pathToFileURL(path.join(sdk, file)).href;
     await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
     await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({ name: "fixture" }));
     await fs.writeFile(path.join(plugin, ".mcp.json"), JSON.stringify({ mcpServers: { data: { command: "node", args: ["server.mjs"] } } }));
@@ -80,8 +77,6 @@ await server.connect(new StdioServerTransport());
     const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-mcp-state-"));
     const plugin = path.join(stateRoot, "codex", "fixture");
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-package-"));
-    const sdk = path.join(process.cwd(), "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm");
-    const sdkUrl = (file: string) => pathToFileURL(path.join(sdk, file)).href;
     await fs.mkdir(path.join(plugin, ".codex-plugin"), { recursive: true });
     await fs.writeFile(path.join(plugin, ".codex-plugin", "plugin.json"), JSON.stringify({ name: "fixture" }));
     await fs.writeFile(
@@ -146,65 +141,8 @@ await server.connect(new StdioServerTransport());
     const tools = buildNativeToolEntries({
       installDir: "/tmp/hermes",
       plugins: [
-        {
-          key: "a.b",
-          name: "A",
-          version: "",
-          description: "",
-          path: "/tmp/hermes/a.b",
-          tools: [
-            {
-              name: "shared",
-              toolset: "a",
-              description: "",
-              schema: {},
-              isAsync: false,
-              requiresEnv: [],
-              available: true,
-            },
-          ],
-          hooks: [],
-          middleware: [],
-          commands: [],
-          cliCommands: [],
-          skills: [],
-          auxiliaryTasks: [],
-          unsupported: [],
-        },
-        {
-          key: "a_b",
-          name: "B",
-          version: "",
-          description: "",
-          path: "/tmp/hermes/a_b",
-          tools: [
-            {
-              name: "shared",
-              toolset: "b",
-              description: "",
-              schema: {},
-              isAsync: false,
-              requiresEnv: [],
-              available: true,
-            },
-            {
-              name: "a_b__shared",
-              toolset: "b",
-              description: "",
-              schema: {},
-              isAsync: false,
-              requiresEnv: [],
-              available: true,
-            },
-          ],
-          hooks: [],
-          middleware: [],
-          commands: [],
-          cliCommands: [],
-          skills: [],
-          auxiliaryTasks: [],
-          unsupported: [],
-        },
+        pluginSummary("a.b", [toolSummary("shared")]),
+        pluginSummary("a_b", [toolSummary("shared"), toolSummary("a_b__shared")]),
       ],
     });
 
