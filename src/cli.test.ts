@@ -1,8 +1,7 @@
-import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
+import { commitFixture } from "../test/git-fixtures.js";
 import { runBabelfishCli } from "./cli.js";
 import * as gitInstall from "./git-install.js";
 
@@ -10,7 +9,6 @@ vi.mock("./native-tools.js", () => ({
   regenerateNativeTools: vi.fn(async () => ({ restartRequired: true })),
 }));
 
-const execFileAsync = promisify(execFile);
 let root: string;
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-cli-"));
@@ -61,16 +59,16 @@ describe("babelfish install clone timeout", () => {
     const source = path.join(root, "source");
     await fs.mkdir(path.join(source, ".codex-plugin"), { recursive: true });
     await fs.writeFile(path.join(source, ".codex-plugin", "plugin.json"), "{}");
-    await execFileAsync("git", ["-C", source, "init", "-q"]);
-    await execFileAsync("git", ["-C", source, "add", "."]);
-    await execFileAsync("git", ["-C", source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"]);
+    await commitFixture(source);
     vi.stubEnv("OPENCLAW_BABELFISH_CLONE_TIMEOUT_MS", "invalid");
     await runBabelfishCli([
       "install", "codex", source, "--name", "ok-plugin",
       "--clone-timeout-ms", "1", "--clone-timeout-ms", "30000",
     ]);
-    await expect(fs.access(path.join(root, "apps", "codex", "ok-plugin", ".codex-plugin", "plugin.json")))
-      .resolves.toBeUndefined();
+    const installed = path.join(root, "apps", "codex", "ok-plugin");
+    await expect(fs.access(path.join(installed, ".codex-plugin", "plugin.json"))).resolves.toBeUndefined();
+    await runBabelfishCli(["uninstall", "codex", "ok-plugin"]);
+    await expect(fs.access(installed)).rejects.toMatchObject({ code: "ENOENT" });
   }, 15_000);
 
   it.each(["flag", "environment"])("passes the %s timeout to the installer", async (override) => {
