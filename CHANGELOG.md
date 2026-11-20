@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep Hermes session state when a caller cancels a request that already failed JSON encoding.
+
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.
