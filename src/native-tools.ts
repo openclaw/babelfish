@@ -11,6 +11,7 @@ import {
   callBundleTool,
   inspectBundleServer,
   listBundlePlugins,
+  type BundleOutputStyle,
   type BundlePlugin,
 } from "./bundle-plugins.js";
 import {
@@ -72,34 +73,23 @@ export type NativeTool = {
   ): Promise<{ content: unknown[]; details?: unknown }>;
 };
 
-export type NativeToolEntry = {
-  kind: "tool";
+type GeneratedPluginEntry = {
   app: SupportedApp;
   name: string;
   plugin: string;
   originalName: string;
   description: string;
+};
+
+export type NativeToolEntry = GeneratedPluginEntry & {
+  kind: "tool";
   inputSchema: JsonObject;
   server?: string;
   mcpOperation?: "listResources" | "readResource" | "listPrompts" | "getPrompt";
 };
 
-export type GeneratedCommandEntry = {
-  app: SupportedApp;
-  name: string;
-  plugin: string;
-  originalName: string;
-  description: string;
-  argsHint: string;
-};
-
-export type GeneratedOutputStyleEntry = {
-  name: string;
-  plugin: string;
-  description: string;
-  instructions: string;
-  keepCodingInstructions: boolean;
-};
+export type GeneratedCommandEntry = GeneratedPluginEntry & { argsHint: string };
+export type GeneratedOutputStyleEntry = BundleOutputStyle & { plugin: string };
 
 export type GeneratedNativeToolRegistry = {
   generatedAt: string;
@@ -207,17 +197,17 @@ function isOutputStyleEntry(value: unknown): value is GeneratedOutputStyleEntry 
     && typeof item.keepCodingInstructions === "boolean";
 }
 
+function hasPluginEntryFields(item: JsonObject): boolean {
+  return isSupportedApp(item.app)
+    && typeof item.name === "string"
+    && typeof item.plugin === "string"
+    && typeof item.originalName === "string"
+    && typeof item.description === "string";
+}
+
 function isNativeToolEntry(value: unknown): value is NativeToolEntry {
   const item = asObject(value);
-  return (
-    item?.kind === "tool" &&
-    isSupportedApp(item.app) &&
-    typeof item.name === "string" &&
-    typeof item.plugin === "string" &&
-    typeof item.originalName === "string" &&
-    typeof item.description === "string" &&
-    asObject(item.inputSchema) !== undefined
-  );
+  return item?.kind === "tool" && hasPluginEntryFields(item) && asObject(item.inputSchema) !== undefined;
 }
 
 function isUnsupportedEntry(
@@ -231,14 +221,7 @@ function isUnsupportedEntry(
 
 function isCommandEntry(value: unknown): value is GeneratedCommandEntry {
   const item = asObject(value);
-  return (
-    typeof item?.name === "string" &&
-    isSupportedApp(item.app) &&
-    typeof item.plugin === "string" &&
-    typeof item.originalName === "string" &&
-    typeof item.description === "string" &&
-    typeof item.argsHint === "string"
-  );
+  return typeof item?.argsHint === "string" && hasPluginEntryFields(item);
 }
 
 async function writeManifest(names: string[], skillDirs: string[], root: string): Promise<void> {

@@ -218,6 +218,17 @@ await server.connect(new StdioServerTransport());
     });
     await fs.writeFile(target, JSON.stringify({ skillDirs: ["skills", false], tools: {}, commands: [null] }));
     expect(readGeneratedNativeToolRegistry(root)).toEqual({ ...empty, skillDirs: ["skills"] });
+    const source = { app: "hermes", plugin: "sample", name: "echo", originalName: "echo", description: "" };
+    const tool = { ...source, kind: "tool", inputSchema: {} };
+    const command = { ...source, argsHint: "" };
+    await fs.writeFile(target, JSON.stringify({
+      tools: [tool, { ...tool, app: "invalid" }, { ...tool, inputSchema: [] }],
+      commands: [command, { ...command, originalName: null }, { ...command, argsHint: false }],
+      cliCommands: [command, { ...command, description: null }],
+    }));
+    expect(readGeneratedNativeToolRegistry(root)).toEqual({
+      ...empty, tools: [tool], commands: [command], cliCommands: [command],
+    });
     await fs.writeFile(target, "{");
     expect(() => readGeneratedNativeToolRegistry(root)).toThrow(SyntaxError);
   });
