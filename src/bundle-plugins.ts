@@ -797,36 +797,34 @@ export async function invokeBundleHooks(
         });
         continue;
       }
-      const trimmed = output.stdout.trim();
-      if (trimmed) {
-        try {
-          const parsed = asObject(JSON.parse(trimmed));
-          if (parsed) {
-            results.push(parsed);
-            const updatedInput = event === "PreToolUse" ? hookUpdatedInput(parsed) : undefined;
-            if (updatedInput) {
-              currentPayload = { ...currentPayload, tool_input: updatedInput };
-            }
-          }
-        } catch {
-          const lastLine = trimmed.split("\n").at(-1);
-          try {
-            const parsed = lastLine ? asObject(JSON.parse(lastLine)) : undefined;
-            if (parsed) {
-              results.push(parsed);
-              const updatedInput = event === "PreToolUse" ? hookUpdatedInput(parsed) : undefined;
-              if (updatedInput) {
-                currentPayload = { ...currentPayload, tool_input: updatedInput };
-              }
-            }
-          } catch {
-            // Successful hook output may be diagnostic text rather than a decision.
-          }
+      const parsed = parseHookOutput(output.stdout);
+      if (parsed) {
+        results.push(parsed);
+        const updatedInput = event === "PreToolUse" ? hookUpdatedInput(parsed) : undefined;
+        if (updatedInput) {
+          currentPayload = { ...currentPayload, tool_input: updatedInput };
         }
       }
     }
   }
   return results;
+}
+
+function parseHookOutput(stdout: string): JsonObject | undefined {
+  const text = stdout.trim();
+  if (!text) return undefined;
+  try {
+    return asObject(JSON.parse(text));
+  } catch {
+    // A hook can log diagnostics before its final JSON line.
+    const newline = text.lastIndexOf("\n");
+    if (newline === -1) return undefined;
+    try {
+      return asObject(JSON.parse(text.slice(newline + 1)));
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 export function hookAdditionalContext(result: JsonObject): string | undefined {
