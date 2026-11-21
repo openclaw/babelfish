@@ -42,7 +42,7 @@ The builtin-only consumer driver resolves the runtime and MCP SDK from the fresh
 installation. It proves CLI help and three-app install/list/uninstall, generated
 contracts, MCP echo, registered plugin session/native tools, strict NodeNext
 declarations with `skipLibCheck:false`, and rollback after a real late skill
-regeneration failure. Compiler `7.0.2` and Node types `26.6.3` live in a separately
+regeneration failure. Compiler `7.0.2` and Node types `26.6.6` live in a separately
 qualified tool installation, never in the production dependency tree. Docker
 warms these inputs before running the low-memory matrix without network access.
 
