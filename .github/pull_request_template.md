@@ -5,6 +5,15 @@ In What changed, lead with the problem, task, or value for plugin users or
 reviewers, then explain the implementation. Use Why for the motivation or
 tradeoff; not every change needs to describe a bug.
 
+In 1–3 plain sentences, say who is affected, what happens today, and why it
+matters to them. For a bug, name the trigger if known. For a feature or internal
+work, describe the need in the actual workflow without inventing harm.
+Could a reader understand the problem without knowing your proposed fix?
+
+Good: "Background checks can use up a new user's model allowance before they've
+asked the assistant to monitor anything."
+Bad: "Turn off periodic checks on fresh installs."
+
 Illustrative wording, not claims about this PR:
 - Implementation-first: "Refactor the transactional install code."
 - Reader-first: "Failed plugin installs should leave the previous plugin usable;
