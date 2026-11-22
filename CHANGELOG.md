@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reject invalid package-check arguments before packing or writing proof, including a missing or empty `--tarball` path.
+
 - Refresh compatible Express, Vite, Rolldown, and transitive dependencies while preserving Node.js 22.19 support and the existing toolchain.
 
 - Check the package on Node.js 26 in Linux CI and honor the selected npm cache during offline consumer validation.
