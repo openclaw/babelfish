@@ -319,8 +319,12 @@ describe("native generated tools", () => {
     await fs.mkdir(path.join(plugin, "commands", "git"), { recursive: true });
     await fs.writeFile(
       path.join(plugin, "commands", "git", "commit.md"),
-      ["---", "description: Commit selected files", "argument-hint: '[files]'", "allowed-tools: Bash(git status *)", "---", "Commit $ARGUMENTS."].join(eol),
+      ["---", 'description: Commit files marked "ready"', "argument-hint: '[files]'", "allowed-tools: Bash(git status *)", "---", "Commit $ARGUMENTS."].join(eol),
     );
+    await fs.mkdir(path.join(plugin, "output-styles"));
+    await fs.writeFile(path.join(plugin, "output-styles", "brief.md"), [
+      "---", "description: 'It''s concise'", "---", "Be brief.",
+    ].join(eol));
     await fs.mkdir(path.join(root, "skills"));
     await fs.writeFile(path.join(root, "openclaw.plugin.json"), JSON.stringify({ id: "babelfish", contracts: {} }));
     await regenerateNativeTools(
@@ -329,8 +333,10 @@ describe("native generated tools", () => {
     );
     await expect(fs.readFile(path.join(root, "skills", "babelfish-bundles", "claude-code-fixture-review", "SKILL.md"), "utf8"))
       .resolves.toBe("---\nname: claude-code-fixture-review\ndescription: review\nallowed-tools: Read\n---\n");
-    await expect(fs.readFile(path.join(root, "skills", "babelfish-bundles", "claude-code-fixture-git-commit", "SKILL.md"), "utf8"))
-      .resolves.toMatch(/description: "Commit selected files"[\s\S]*argument-hint: '\[files\]'[\s\S]*allowed-tools: Bash\(git status \*\)[\s\S]*disable-model-invocation: true[\s\S]*Commit \$ARGUMENTS\./);
+    const command = await fs.readFile(path.join(root, "skills", "babelfish-bundles", "claude-code-fixture-git-commit", "SKILL.md"), "utf8");
+    expect(command).toContain(`description: ${JSON.stringify('Commit files marked "ready"')}`);
+    expect(command).toMatch(/argument-hint: '\[files\]'[\s\S]*allowed-tools: Bash\(git status \*\)[\s\S]*disable-model-invocation: true[\s\S]*Commit \$ARGUMENTS\./);
+    expect(readGeneratedNativeToolRegistry(root).outputStyles).toMatchObject([{ description: "It's concise" }]);
   });
 
   it.each(["\n", "\r\n"])("reads block descriptions from commands, agents and output styles with %j", async (eol) => {

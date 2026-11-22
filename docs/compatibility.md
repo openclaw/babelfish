@@ -53,6 +53,9 @@ Pre-tool and prompt hooks continue to treat `continue: false` as blocking.
 
 Babelfish reads `.claude-plugin/plugin.json`, declared or conventional skill, command, agent, output-style, hook, and MCP paths. Existing `SKILL.md` directories are copied intact. Markdown commands, agents, and output styles are converted to user-invoked OpenClaw skills.
 
+A plain description such as `Suggest "help"` keeps its closing quote. In a
+single-quoted description, `'It''s ready'` reads as `It's ready`.
+
 Generated descriptions read literal (`|`) and folded (`>`) YAML block scalars,
 including header comments, single-digit indentation indicators, and `-`/`+`
 chomping indicators in either order. Folding retains breaks around more-indented

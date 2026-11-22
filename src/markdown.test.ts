@@ -33,6 +33,20 @@ describe("readFrontmatterScalar", () => {
     });
   });
 
+  it.each([
+    ['Suggest "help"', 'Suggest "help"'],
+    ["Review the teams'", "Review the teams'"],
+    ["'It''s ready'", "It's ready"],
+    ["'Keep ''both'' quotes'", "Keep 'both' quotes"],
+    ["''", ""],
+    ['""', ""],
+  ])("reads quote punctuation in %s on either scalar line", (source, expected) => {
+    const inline = `description: ${source}\nnext: kept`;
+    const indented = `description:\n  ${source}\nnext: kept`;
+    expect(readFrontmatterScalar(inline, "description")).toEqual({ value: expected, consumed: [0] });
+    expect(readFrontmatterScalar(indented, "description")).toEqual({ value: expected, consumed: [0, 1] });
+  });
+
   it("joins a folded description and leaves the next key", () => {
     const frontmatter = [
       "description: >",
