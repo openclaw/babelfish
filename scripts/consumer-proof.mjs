@@ -144,9 +144,12 @@ if (process.argv[2] !== "--worker") {
     cli(["install", app, path.join(sources, app), "--name", names[app]]);
     reportPhase(`install ${app} fixture`);
   }
-  const list = () => {
+  const list = (expectedCount = 1) => {
     const result = cli(["list"]);
-    for (const app of Object.keys(names)) assert.equal(result.apps.find((entry) => entry.app === app)?.plugins.length, 1);
+    for (const app of Object.keys(names)) {
+      const entry = result.apps.find((entry) => entry.app === app);
+      assert.equal(entry?.plugins.length, expectedCount, `installed plugin count for ${app}`);
+    }
     return result;
   };
   list();
@@ -290,6 +293,12 @@ if (process.argv[2] !== "--worker") {
   try { cli(["install", "hermes", hermes, "--name", names.hermes, "--force"]); } catch (error) { failure = error; }
   assert(failure && failure.status !== 0);
   assert.match(String(failure.stderr), /utf-8|UnicodeDecodeError/i, "actual late skill regeneration failure");
+  for (const extra of ["--dry-run", "second-plugin"]) {
+    assert.throws(() => cli(["uninstall", "hermes", names.hermes, extra]), {
+      status: 1,
+      stderr: new RegExp(`Unexpected uninstall argument: ${extra}`),
+    });
+  }
   assert.deepEqual(await snapshot(path.join(state, "hermes", names.hermes)), oldInstall);
   assert.deepEqual(await snapshot(path.join(installed, "skills")), oldSkills);
   assert.deepEqual(await fs.readFile(path.join(installed, "babelfish.generated.json")), oldRegistry);
@@ -299,6 +308,6 @@ if (process.argv[2] !== "--worker") {
   list();
   await withMcp(echo);
   for (const app of Object.keys(names)) cli(["uninstall", app, names[app]]);
-  assert(cli(["list"]).apps.every((entry) => entry.plugins.length === 0));
+  list(0);
   reportPhase("rollback and uninstall");
 }

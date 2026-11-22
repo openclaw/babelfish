@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reject extra uninstall arguments before removing a plugin. Previously, adding `--dry-run` or a second name still removed the first plugin.
+
 - Refresh compatible Express, Vite, Rolldown, and transitive dependencies while preserving Node.js 22.19 support and the existing toolchain.
 
 - Check the package on Node.js 26 in Linux CI and honor the selected npm cache during offline consumer validation.

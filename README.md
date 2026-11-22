@@ -52,6 +52,7 @@ Installing an already installed name requires `--force`; a rejected duplicate le
 | Stop hook decisions | On upgrade, installed Claude Code and Codex Stop hooks with `continue: false` finish the turn rather than request revision. This takes precedence over a block on the same hook only; a separate blocking hook still requests revision in either order. Pre-tool and prompt blocking is unchanged. |
 | Hermes MCP errors | Command and tool handler failures return a tool result with `isError: true`. Unknown tool names return JSON-RPC error `-32602`. |
 | Install options | Omit `--name` to use the source name. Missing values, conflicting names, and unexpected arguments stop the install before cloning, including with `--force`. |
+| Uninstall arguments | Pass one plugin name after the app. A second name or an option such as `--dry-run` stops the command before removal. |
 | Unsupported behavior | Recorded during generation and reported at Gateway startup |
 
 Support differs by source app and surface. See the [compatibility reference](docs/compatibility.md) for the full matrix, source-specific behavior, configuration, and example plugins.

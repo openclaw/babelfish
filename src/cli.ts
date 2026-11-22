@@ -106,6 +106,9 @@ export async function runBabelfishCli(args: string[]): Promise<void> {
     return;
   }
 
+  if (args.length > 3) {
+    throw new Error(`Unexpected uninstall argument: ${args[3]}`);
+  }
   const result = await uninstallPlugin({ ...options, name: target });
   console.log(JSON.stringify({ app, removed: result, ...generated }, null, 2));
 }
