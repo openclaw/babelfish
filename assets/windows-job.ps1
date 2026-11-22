@@ -11,6 +11,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+function Write-BenchTime([string]$Stage) {
+  if ($env:BABELFISH_LAUNCH_BENCH) {
+    [Console]::Error.WriteLine(("[launch-bench] {0} {1}" -f $Stage, [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()))
+  }
+}
+Write-BenchTime "entry"
 
 Add-Type -TypeDefinition @"
 using System;
@@ -539,13 +545,17 @@ public static class BabelfishJob {
     }
 }
 "@
+Write-BenchTime "compiled"
 
 if ($PSCmdlet.ParameterSetName -eq "Argv") {
   $argvJson = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($ArgvBase64))
   # Windows PowerShell returns the JSON array as one pipeline object.
   [string[]]$commandArgv = ConvertFrom-Json -InputObject $argvJson
+  Write-BenchTime "decoded"
   $executable = (Get-Command -Name $commandArgv[0] -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+  Write-BenchTime "resolved"
   [string[]]$arguments = @($commandArgv | Select-Object -Skip 1)
+  Write-BenchTime "launch"
   exit [BabelfishJob]::RunArgv($executable, $arguments, $Mode)
 }
 
