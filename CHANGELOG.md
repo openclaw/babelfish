@@ -20,6 +20,8 @@
 
 - Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log. Fixture preparation and each source app's install have separate timings.
 
+- Speed up Windows command and monitor startup in fresh profiles by loading PowerShell's compiler cmdlet directly.
+
 - Load the MCP SDK when a client or server starts, reducing startup time for everyday CLI commands and plugin registration.
 
 - Reuse the CI npm download cache for fresh package-consumer installs on Linux, macOS, and Windows.
