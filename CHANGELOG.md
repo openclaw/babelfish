@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Reject extra uninstall arguments before removing a plugin. Previously, adding `--dry-run` or a second name still removed the first plugin.
+- Reject invalid package-check arguments before packing or writing proof, including a missing or empty `--tarball` path.
 
 - Refresh compatible Express, Vite, Rolldown, and transitive dependencies while preserving Node.js 22.19 support and the existing toolchain.
 
@@ -56,6 +56,8 @@
 - Report Hermes command handler failures as MCP tool errors and reject unknown tool names with the JSON-RPC invalid-params code.
 
 - Reject malformed install options before cloning so `--force` cannot silently replace a plugin under its source name.
+
+- Reject extra uninstall arguments before removing a plugin. Previously, adding `--dry-run` or a second name still removed the first plugin.
 
 ## 0.1.2 — 2026-10-17
 
