@@ -7,6 +7,13 @@ export function splitFrontmatter(source: string): { frontmatter: string; body: s
   };
 }
 
+function readInlineScalar(raw: string): string {
+  const single = /^'((?:[^']|'')*)'$/.exec(raw);
+  if (single) return single[1].replaceAll("''", "'");
+  const double = /^"((?:[^"\\]|\\.)*)"$/.exec(raw);
+  return double?.[1] ?? raw;
+}
+
 export function readFrontmatterScalar(
   frontmatter: string,
   name: string,
@@ -29,11 +36,11 @@ export function readFrontmatterScalar(
         const continuation = lines[cursor];
         if (!continuation || !/^[ \t]+\S/.test(continuation)) return undefined;
         return {
-          value: continuation.trim().replace(/^['"]|['"]$/g, ""),
+          value: readInlineScalar(continuation.trim()),
           consumed: Array.from({ length: cursor - index + 1 }, (_, offset) => index + offset),
         };
       }
-      return { value: raw.replace(/^['"]|['"]$/g, ""), consumed: [index] };
+      return { value: readInlineScalar(raw), consumed: [index] };
     }
     const indicator = header[3] ?? header[4];
     const explicitIndent = indicator ? Number(indicator) : undefined;

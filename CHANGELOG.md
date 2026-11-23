@@ -14,6 +14,8 @@
 
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
 
+- Preserve trailing quotation marks and read doubled apostrophes in imported Markdown descriptions.
+
 - Preserve literal event data in Claude prompt-hook templates and clear evaluation timers when the host fails.
 
 - Report tool installation, fresh package installation, lifecycle checks, and cleanup times in the package-consumer log. Fixture preparation and each source app's install have separate timings.
