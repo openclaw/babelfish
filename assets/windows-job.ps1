@@ -17,10 +17,12 @@ function Write-BenchTime([string]$Stage) {
   }
 }
 Write-BenchTime "entry"
-if ($env:BABELFISH_LAUNCH_BENCH) {
+if ($env:BABELFISH_LAUNCH_BENCH -eq "named-import") {
   Import-Module Microsoft.PowerShell.Utility
-  Write-BenchTime "imported"
+} elseif ($env:BABELFISH_LAUNCH_BENCH -eq "inbox-import") {
+  Import-Module "$PSHOME\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1"
 }
+Write-BenchTime "imported"
 
 Add-Type -TypeDefinition @"
 using System;

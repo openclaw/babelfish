@@ -8,30 +8,27 @@ import { fileURLToPath } from "node:url";
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-launch-"));
 try {
   const script = path.join(root, "windows-job.ps1");
-  await fs.copyFile(fileURLToPath(new URL("../assets/windows-job.ps1", import.meta.url)), script);
+  const source = await fs.readFile(fileURLToPath(new URL("../assets/windows-job.ps1", import.meta.url)), "utf8");
+  await fs.writeFile(script, source);
+  const qualified = path.join(root, "qualified.ps1");
+  await fs.writeFile(qualified, source.replace("Add-Type -TypeDefinition", "Microsoft.PowerShell.Utility\\Add-Type -TypeDefinition"));
   const psHome = path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0");
   const ps = path.join(psHome, "powershell.exe");
   const pick = (names) => Object.fromEntries(names.filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
-  const separate = path.join(root, "machine-data");
-  await fs.mkdir(separate);
-  const pwsh = path.join(process.env.ProgramFiles, "PowerShell", "7", "pwsh.exe");
-  const profiles = ["TEMP","TMP","LOCALAPPDATA","APPDATA","USERPROFILE","HOMEDRIVE","HOMEPATH"];
-  const identity = ["COMPUTERNAME","USERDOMAIN","USERNAME","USERDOMAIN_ROAMINGPROFILE","LOGONSERVER"];
-  const machine = ["ProgramData","ALLUSERSPROFILE","PUBLIC"];
-  for (const [label, extra, engine = ps] of [
-    ["baseline", {}], ["machine-data", pick(machine)], ["synthetic-machine-data", { ProgramData: separate, ALLUSERSPROFILE: separate }],
-    ["identity", pick(identity)], ["profile-vars",pick(profiles)], ["temp-only",pick(["TEMP","TMP"])],
-    ["local-appdata",pick(["LOCALAPPDATA"])], ["roaming-appdata",pick(["APPDATA"])], ["userprofile",pick(["USERPROFILE"])],
-    ["system-account-paths",pick([...profiles,...identity,...machine,"SystemDrive","ProgramFiles","PSModulePath"])],
-    ["installed-pwsh", {}, pwsh], ["baseline-again", {}],
+  const machine = path.join(root, "isolated-machine-data");
+  await fs.mkdir(machine);
+  for (const [label, mode, target = script, extra = {}] of [
+    ["baseline", "implicit"], ["explicit", "named-import"], ["qualified", "implicit", qualified],
+    ["inbox", "inbox-import"], ["baseline-again", "implicit"], ["inbox-again", "inbox-import"],
+    ["machine-data", "implicit", script, { ProgramData: machine, ALLUSERSPROFILE: machine }],
   ]) {
     const home = path.join(root, label);
     await fs.mkdir(home);
     const env = { ...pick(["PATH","SystemRoot","ComSpec","PATHEXT","WINDIR"]), HOME: home, USERPROFILE: home,
-      APPDATA: home, LOCALAPPDATA: home, TMPDIR: home, TEMP: home, TMP: home, BABELFISH_LAUNCH_BENCH: "1", ...extra };
+      APPDATA: home, LOCALAPPDATA: home, TMPDIR: home, TEMP: home, TMP: home, BABELFISH_LAUNCH_BENCH: mode, ...extra };
     const argv = Buffer.from(JSON.stringify(["git", "--version"])).toString("base64");
     const start = Date.now();
-    const run = spawnSync(engine, ["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",script,"-Mode","command","-ArgvBase64",argv],
+    const run = spawnSync(ps, ["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",target,"-Mode","command","-ArgvBase64",argv],
       { env, cwd: root, encoding: "utf8", timeout: 90000 });
     const end = Date.now();
     const markers = [...String(run.stderr).matchAll(/\[launch-bench\] (\w+) (\d+)/g)];
