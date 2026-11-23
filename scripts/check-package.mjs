@@ -4,15 +4,22 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 import { inspectTarball } from "./package-archive.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const option = (name) => {
-  const index = process.argv.indexOf(name);
-  return index < 0 ? undefined : process.argv[index + 1];
-};
-const output = option("--out");
-const existing = option("--tarball");
+const { values } = parseArgs({
+  options: {
+    out: { type: "string", multiple: true },
+    tarball: { type: "string", multiple: true },
+  },
+});
+for (const [name, paths] of Object.entries(values)) {
+  assert(paths.length === 1, `specify --${name} only once`);
+  assert(paths[0].length > 0, `--${name} requires a non-empty path`);
+}
+const [output] = values.out ?? [];
+const [existing] = values.tarball ?? [];
 const directory = output ? path.resolve(output) : await fs.mkdtemp(path.join(os.tmpdir(), "babelfish-pack-"));
 await fs.mkdir(directory, { recursive: true });
 try {

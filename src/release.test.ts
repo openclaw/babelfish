@@ -4,8 +4,32 @@ import { gzipSync } from "node:zlib";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { inspectTarball } from "../scripts/package-archive.mjs";
 import { admitReleaseJobs, githubUrl, outputs, TAG, validateDryRunContext, validateStatement, verifyReleaseTag } from "../scripts/release-common.mjs";
+
+describe("package checker arguments", () => {
+  it.each([
+    { args: ["--tarball"], error: /--tarball.*missing/i },
+    { args: ["--tarball", ""], error: /--tarball.*path/i },
+    { args: ["--tarbal", "saved.tgz"], error: /unknown option.*--tarbal/i },
+    { args: ["--tarball", "one.tgz", "--tarball", "two.tgz"], error: /--tarball.*once/i },
+    { args: ["--out", "other"], error: /--out.*once/i },
+  ])("rejects $args before creating output", ({ args, error }) => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "babelfish-pack-args-"));
+    try {
+      const script = fileURLToPath(new URL("../scripts/check-package.mjs", import.meta.url));
+      const result = spawnSync(process.execPath, [script, "--out", "proof", ...args], {
+        cwd, encoding: "utf8", env: { PATH: cwd, SystemRoot: process.env.SystemRoot },
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(error);
+      expect(fs.readdirSync(cwd)).toEqual([]);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("validation-only release dispatch", () => {
   const context = {

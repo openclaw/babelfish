@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Preserve trailing quotation marks and read doubled apostrophes in imported Markdown descriptions.
+- Reject invalid package-check arguments before packing or writing proof, including a missing or empty `--tarball` path.
 
 - Refresh compatible Express, Vite, Rolldown, and transitive dependencies while preserving Node.js 22.19 support and the existing toolchain.
 
@@ -13,6 +13,8 @@
 - Count each monitor output fragment once when enforcing the 1 MiB line limit.
 
 - Use the default Hermes deadline when the configured value exceeds the maximum Node timer.
+
+- Preserve trailing quotation marks and read doubled apostrophes in imported Markdown descriptions.
 
 - Preserve literal event data in Claude prompt-hook templates and clear evaluation timers when the host fails.
 

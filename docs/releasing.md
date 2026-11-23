@@ -38,6 +38,10 @@ Use `-- --out <directory>` to retain these exact bytes. Use `-- --tarball <path>
 to validate retained bytes without repacking. Build first when using this command
 outside the full check. The public compatibility guide is included in the archive.
 
+To compare a local rebuild with a CI tarball, match the Node.js distribution,
+npm version, and permissions on the packaged files. The gzip implementation and
+the file modes stored in the tar archive can each change the SHA-256 digest.
+
 The builtin-only consumer driver resolves the runtime and MCP SDK from the fresh
 installation. It proves CLI help and three-app install/list/uninstall, generated
 contracts, MCP echo, registered plugin session/native tools, strict NodeNext
