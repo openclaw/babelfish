@@ -17,6 +17,10 @@ function Write-BenchTime([string]$Stage) {
   }
 }
 Write-BenchTime "entry"
+if ($env:BABELFISH_LAUNCH_BENCH) {
+  Import-Module Microsoft.PowerShell.Utility
+  Write-BenchTime "imported"
+}
 
 Add-Type -TypeDefinition @"
 using System;

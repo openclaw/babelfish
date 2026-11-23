@@ -11,26 +11,27 @@ try {
   await fs.copyFile(fileURLToPath(new URL("../assets/windows-job.ps1", import.meta.url)), script);
   const psHome = path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0");
   const ps = path.join(psHome, "powershell.exe");
-  const modules = { PSModulePath: path.join(psHome, "Modules") };
   const pick = (names) => Object.fromEntries(names.filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
-  const files = pick(["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "CommonProgramFiles", "CommonProgramFiles(x86)", "CommonProgramW6432"]);
-  const platform = pick(["SystemDrive", "OS", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS"]);
-  const absoluteGit = spawnSync("where.exe", ["git.exe"], { encoding: "utf8" }).stdout.trim().split(/\r?\n/)[0];
-  assert(path.isAbsolute(absoluteGit));
-  for (const [label, extra, git = "git"] of [
-    ["baseline", {}], ["inbox-modules", modules], ["program-files", files], ["platform", platform],
-    ["program-files-only", pick(["ProgramFiles"])],
-    ["architecture-only", pick(["PROCESSOR_ARCHITECTURE"])],
-    ["absolute-git", {}, absoluteGit], ["combined", { ...modules, ...platform, ...files }],
-    ["baseline-again", {}],
+  const separate = path.join(root, "machine-data");
+  await fs.mkdir(separate);
+  const pwsh = path.join(process.env.ProgramFiles, "PowerShell", "7", "pwsh.exe");
+  const profiles = ["TEMP","TMP","LOCALAPPDATA","APPDATA","USERPROFILE","HOMEDRIVE","HOMEPATH"];
+  const identity = ["COMPUTERNAME","USERDOMAIN","USERNAME","USERDOMAIN_ROAMINGPROFILE","LOGONSERVER"];
+  const machine = ["ProgramData","ALLUSERSPROFILE","PUBLIC"];
+  for (const [label, extra, engine = ps] of [
+    ["baseline", {}], ["machine-data", pick(machine)], ["synthetic-machine-data", { ProgramData: separate, ALLUSERSPROFILE: separate }],
+    ["identity", pick(identity)], ["profile-vars",pick(profiles)], ["temp-only",pick(["TEMP","TMP"])],
+    ["local-appdata",pick(["LOCALAPPDATA"])], ["roaming-appdata",pick(["APPDATA"])], ["userprofile",pick(["USERPROFILE"])],
+    ["system-account-paths",pick([...profiles,...identity,...machine,"SystemDrive","ProgramFiles","PSModulePath"])],
+    ["installed-pwsh", {}, pwsh], ["baseline-again", {}],
   ]) {
     const home = path.join(root, label);
     await fs.mkdir(home);
     const env = { ...pick(["PATH","SystemRoot","ComSpec","PATHEXT","WINDIR"]), HOME: home, USERPROFILE: home,
       APPDATA: home, LOCALAPPDATA: home, TMPDIR: home, TEMP: home, TMP: home, BABELFISH_LAUNCH_BENCH: "1", ...extra };
-    const argv = Buffer.from(JSON.stringify([git, "--version"])).toString("base64");
+    const argv = Buffer.from(JSON.stringify(["git", "--version"])).toString("base64");
     const start = Date.now();
-    const run = spawnSync(ps, ["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",script,"-Mode","command","-ArgvBase64",argv],
+    const run = spawnSync(engine, ["-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",script,"-Mode","command","-ArgvBase64",argv],
       { env, cwd: root, encoding: "utf8", timeout: 90000 });
     const end = Date.now();
     const markers = [...String(run.stderr).matchAll(/\[launch-bench\] (\w+) (\d+)/g)];
@@ -44,7 +45,7 @@ try {
     console.log(JSON.stringify({ label, totalMs: end - start, durations, status: run.status }));
     assert.equal(run.status, 0);
     assert.match(run.stdout, /git version/);
-    assert.equal(markers.length, 5);
+    assert.equal(markers.length, 6);
   }
 } finally {
   await fs.rm(root, { recursive: true, force: true, maxRetries: 4 });
