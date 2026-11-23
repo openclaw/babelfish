@@ -59,6 +59,8 @@
 
 - Reject malformed install options before cloning so `--force` cannot silently replace a plugin under its source name.
 
+- Reject extra uninstall arguments before removing a plugin. Previously, adding `--dry-run` or a second name still removed the first plugin.
+
 ## 0.1.2 — 2026-10-17
 
 **Highlights:** Preserve literal shell values and installed deny guards; security hardening bounds retained monitor output to prevent unbounded memory growth.
