@@ -671,11 +671,21 @@ describe("spawnShellCommand", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it("preserves literal argv through the platform launcher", async () => {
+  it("preserves literal argv through the platform launcher with a fresh profile", async () => {
+    const home = await tempDir("babelfish-argv-");
     const args = ["", "two words", "a\"b", "back\\slash\\", "trail space\\", "$(echo changed)", "%PATH%", "x & y", "日本語"];
     const child = spawnShellCommand(
       [process.execPath, "-e", "process.stdout.write(JSON.stringify(process.argv.slice(1)))", ...args],
-      { detached: true, stdio: ["ignore", "pipe", "pipe"] },
+      {
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
+          ComSpec: process.env.ComSpec, PATHEXT: process.env.PATHEXT, WINDIR: process.env.WINDIR,
+          HOME: home, USERPROFILE: home, APPDATA: home, LOCALAPPDATA: home,
+          TMPDIR: home, TMP: home, TEMP: home,
+        },
+      },
     );
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];

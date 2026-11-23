@@ -12,7 +12,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Add-Type -TypeDefinition @"
+# Skip module discovery when the launcher starts with a fresh profile.
+Microsoft.PowerShell.Utility\Add-Type -TypeDefinition @"
 using System;
 using System.ComponentModel;
 using System.IO;
