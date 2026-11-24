@@ -1,10 +1,7 @@
-## Summary
+## What Problem This Solves
 
 <!--
-In What changed, lead with the problem, task, or value for plugin users or
-reviewers, then explain the implementation. Use Why for the motivation or
-tradeoff; not every change needs to describe a bug.
-
+Describe the concrete user, product, or operational problem.
 In 1–3 plain sentences, say who is affected, what happens today, and why it
 matters to them. For a bug, name the trigger if known. For a feature or internal
 work, describe the need in the actual workflow without inventing harm.
@@ -13,37 +10,35 @@ Could a reader understand the problem without knowing your proposed fix?
 Good: "Background checks can use up a new user's model allowance before they've
 asked the assistant to monitor anything."
 Bad: "Turn off periodic checks on fresh installs."
-
-Illustrative wording, not claims about this PR:
-- Implementation-first: "Refactor the transactional install code."
-- Reader-first: "Failed plugin installs should leave the previous plugin usable;
-  keep the previous files until the replacement succeeds."
 -->
-- What changed:
-- Why:
-- Related issue:
 
-## Compatibility
-
-- Source app(s):
-- Affected surface(s):
-- Trust-boundary or execution impact:
-
-## Verification
+## User Impact
 
 <!--
-Explain what validation established before listing commands or logs. Connect
-the outcome to the affected plugin surface or task, and state failures, skipped
-checks, and limitations without presenting them as passes.
-
-Illustrative wording, not an additional test requirement:
-- Command-only: "Ran the install tests."
-- Outcome-first: "The failed-install fixture retained the previous plugin files;
-  the focused install tests passed."
+"User impact: <what users, operators, or developers can now do or expect>."
+Lead with the concrete outcome in plain language, usually one sentence.
+For internal-only changes, say there is no user-visible change; do not invent a benefit.
+Keep important risks, breaking changes, migrations, and required user actions visible here.
 -->
-- [ ] Added or updated focused tests.
-- [ ] Ran `npm run check`.
-- [ ] Ran `npm run pack:check`.
-- [ ] Updated the README compatibility table when behavior changed.
-- [ ] Updated `CHANGELOG.md` for user-visible or operational changes.
-- [ ] Removed secrets, private paths, and generated artifacts from the diff.
+
+## Why This Change Was Made
+
+<!--
+Briefly explain how the change addresses the problem without repeating the impact.
+Keep the body short. Leave file lists, internal acronyms, and root-cause walkthroughs
+in the diff or optional <details>; include technical detail only when it explains
+behavior or a material tradeoff. Do not hide risks or required actions in <details>.
+-->
+
+## Evidence
+
+<!--
+Show the most useful proof that this change works. Screenshots, screencasts,
+terminal output, focused tests, CI results, live observations, redacted logs,
+and artifact links are all useful.
+
+Start with the behavior checked and the result in plain language. Reviewers will
+inspect the code, tests, and CI; do not make them decode command lists to learn
+what was verified. Put exact commands, commit hashes, and long output in links
+or optional <details>. Keep the useful evidence summary and meaningful gaps visible.
+-->
