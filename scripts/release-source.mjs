@@ -23,7 +23,7 @@ async function verifyVersions() {
 
 async function releaseNotes() {
   const changelog = await fs.readFile(path.join(root, "CHANGELOG.md"), "utf8");
-  const notes = changelog.split(`## ${PACKAGE_VERSION} — 2026-10-17\n`)[1]?.split(/\n## /)[0]?.trim();
+  const notes = changelog.split(`## ${PACKAGE_VERSION} — 2026-11-25\n`)[1]?.split(/\n## /)[0]?.trim();
   assert(notes, "dated contributor release notes required");
   return notes;
 }
@@ -37,7 +37,7 @@ if (mode === "dry-run") {
   await releaseNotes();
   const directory = path.resolve(process.argv[3]);
   const proof = JSON.parse(await fs.readFile(path.join(directory, "package-proof.json"), "utf8"));
-  assert.equal(proof.filename, "openclaw-babelfish-0.1.2.tgz");
+  assert.equal(proof.filename, "openclaw-babelfish-0.1.3.tgz");
   const checked = inspectTarball(await fs.readFile(path.join(directory, proof.filename)));
   for (const key of ["size", "sha256", "sha512", "integrity"]) assert.equal(proof[key], checked[key]);
   console.log(JSON.stringify({ dryRun: true, source, version: PACKAGE_VERSION, ...proof }));
@@ -88,7 +88,7 @@ if (mode === "discover") {
   const directory = path.resolve(process.argv[3]);
   const proofPath = path.join(directory, "package-proof.json");
   const proof = JSON.parse(await fs.readFile(proofPath, "utf8"));
-  assert.equal(proof.filename, "openclaw-babelfish-0.1.2.tgz");
+  assert.equal(proof.filename, "openclaw-babelfish-0.1.3.tgz");
   const checked = inspectTarball(await fs.readFile(path.join(directory, proof.filename)));
   for (const key of ["size", "sha256", "sha512", "integrity"]) assert.equal(proof[key], checked[key]);
   if (mode === "seal") {

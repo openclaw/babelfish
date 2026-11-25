@@ -577,7 +577,7 @@ async function withBundleClient<T>(
     import("@modelcontextprotocol/sdk/client/stdio.js"),
     import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
   ]);
-  const client = new Client({ name: "babelfish", version: "0.1.2" });
+  const client = new Client({ name: "babelfish", version: "0.1.3" });
   async function run(transport: Transport): Promise<T> {
     await connectWithTimeout(client, transport, timeoutMs);
     try {

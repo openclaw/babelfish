@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - v0.1.2
+      - v0.1.3
   workflow_dispatch:
     inputs:
       dry_run:
@@ -175,7 +175,7 @@ jobs:
           env = os.environ
           assert env["GITHUB_REF_PROTECTED"] == "true"
           assert env["GITHUB_REPOSITORY"] == "openclaw/babelfish"
-          assert env["GITHUB_REF"] == "refs/tags/v0.1.2"
+          assert env["GITHUB_REF"] == "refs/tags/v0.1.3"
           assert env["GITHUB_SHA"] == env["SOURCE"]
           assert not any(env.get(key) for key in ["NPM_TOKEN", "NODE_AUTH_TOKEN", "NPM_CONFIG_PROVENANCE_FILE"])
           class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -200,7 +200,7 @@ jobs:
           assert artifact["workflow_run"]["head_sha"] == env["SOURCE"]
           directory = pathlib.Path(env["RUNNER_TEMP"]) / "npm-artifact"
           proof = json.loads((directory / "package-proof.json").read_text())
-          assert proof["filename"] == "openclaw-babelfish-0.1.2.tgz"
+          assert proof["filename"] == "openclaw-babelfish-0.1.3.tgz"
           assert proof["source"] == env["SOURCE"] and proof["tagObject"] == env["TAG_OBJECT"]
           assert proof["runId"] == env["GITHUB_RUN_ID"] and proof["buildAttempt"] == 1
           tarball = directory / proof["filename"]
@@ -223,31 +223,31 @@ jobs:
                   assert not member.pax_headers
                   names.add(member.name)
               package = json.load(archive.extractfile("package/package.json"))
-          assert package["name"] == "@openclaw/babelfish" and package["version"] == "0.1.2"
+          assert package["name"] == "@openclaw/babelfish" and package["version"] == "0.1.3"
           assert package["repository"]["url"] == "git+https://github.com/openclaw/babelfish.git"
           assert package["publishConfig"] == {"access": "public", "registry": "https://registry.npmjs.org/"}
           assert package["main"] == "./dist/index.js" and package["types"] == "./dist/index.d.ts"
           assert package["exports"] == {".": {"types": "./dist/index.d.ts", "import": "./dist/index.js"}}
           assert package["bin"] == {"babelfish": "dist/bin.js"} and package["type"] == "module"
           assert all("package/" + name in names for name in ["dist/index.js", "dist/index.d.ts", "dist/bin.js", "docs/compatibility.md", "openclaw.plugin.json", "python/hermes_openclaw_bridge.py"])
-          ref = json.loads(get(api + "git/ref/tags/v0.1.2", True))
+          ref = json.loads(get(api + "git/ref/tags/v0.1.3", True))
           assert ref["object"]["type"] == "tag" and ref["object"]["sha"] == proof["tagObject"]
           tag = json.loads(get(api + "git/tags/" + proof["tagObject"], True))
           assert tag["object"]["sha"] == proof["source"] and tag["verification"]["verified"]
           def view():
-              result = subprocess.run(["npm", "view", "@openclaw/babelfish@0.1.2", "--json", "--registry=https://registry.npmjs.org/"], capture_output=True, text=True, timeout=60)
+              result = subprocess.run(["npm", "view", "@openclaw/babelfish@0.1.3", "--json", "--registry=https://registry.npmjs.org/"], capture_output=True, text=True, timeout=60)
               try:
                   metadata = json.loads(result.stdout)
               except Exception:
                   raise RuntimeError("Uncertain registry response; no publish permitted")
               if result.returncode == 0:
-                  assert metadata["name"] == "@openclaw/babelfish" and metadata["version"] == "0.1.2"
+                  assert metadata["name"] == "@openclaw/babelfish" and metadata["version"] == "0.1.3"
                   return metadata
               assert metadata.get("error", {}).get("code") == "E404", "Only an exact registry E404 permits publication"
               return None
           def reconcile(metadata):
               assert metadata["dist"]["integrity"] == env["TAR_INTEGRITY"] == proof["integrity"]
-              url = "https://registry.npmjs.org/@openclaw/babelfish/-/babelfish-0.1.2.tgz"
+              url = "https://registry.npmjs.org/@openclaw/babelfish/-/babelfish-0.1.3.tgz"
               assert metadata["dist"]["tarball"] == url
               published = get(url, limit=8*1024*1024)
               assert published == data

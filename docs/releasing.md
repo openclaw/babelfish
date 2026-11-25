@@ -1,6 +1,6 @@
-# Releasing Babelfish 0.1.2
+# Releasing Babelfish 0.1.3
 
-The release workflow publishes only `v0.1.2`. Prepare later versions in a separate
+The release workflow publishes only `v0.1.3`. Prepare later versions in a separate
 reviewed change. Do not publish from a local checkout or use an npm token.
 
 ## Before tagging
@@ -9,7 +9,7 @@ reviewed change. Do not publish from a local checkout or use an npm token.
    independent static review, and ClawSweeper review pass.
 2. Verify live main and npm version absence. Keep the package and lock versions
    aligned. Keep contributor credits in the dated changelog.
-3. Verify an active tag ruleset covering `v0.1.2` and the `stable-release`
+3. Verify an active tag ruleset covering `v0.1.3` and the `stable-release`
    environment with a tag deployment policy. Do not add a required reviewer for
    an authorized self-release. Do not weaken either protection to unblock a run.
 4. Dispatch `release.yml` on the release-preparation merge commit on `main` with
