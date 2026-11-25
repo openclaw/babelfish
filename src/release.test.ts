@@ -46,7 +46,7 @@ describe("validation-only release dispatch", () => {
     { GITHUB_REPOSITORY: "other/babelfish" },
     { GITHUB_EVENT_NAME: "push" },
     { GITHUB_REF: "refs/heads/other" },
-    { GITHUB_REF: "refs/tags/v0.1.2" },
+    { GITHUB_REF: "refs/tags/v0.1.3" },
     { GITHUB_WORKFLOW_REF: "openclaw/babelfish/.github/workflows/other.yml@refs/heads/main" },
     { DRY_RUN: "false" },
     { DRY_RUN: undefined },
@@ -179,9 +179,9 @@ describe("verified release tag signer", () => {
     const { size, sha256, sha512, integrity } = inspectTarball(archive);
     const directory = path.join(root, "artifact");
     fs.mkdirSync(directory);
-    fs.writeFileSync(path.join(directory, "openclaw-babelfish-0.1.2.tgz"), archive);
+    fs.writeFileSync(path.join(directory, "openclaw-babelfish-0.1.3.tgz"), archive);
     const proofPath = path.join(directory, "package-proof.json");
-    fs.writeFileSync(proofPath, JSON.stringify({ filename: "openclaw-babelfish-0.1.2.tgz", size, sha256, sha512, integrity }));
+    fs.writeFileSync(proofPath, JSON.stringify({ filename: "openclaw-babelfish-0.1.3.tgz", size, sha256, sha512, integrity }));
     const artifact = { id: 123, name: "npm-package-456", digest: `sha256:${"a".repeat(64)}`, workflow_run: { id: 456, head_sha: source }, expired: false };
     const apiResponses = {
       [`git/ref/tags/${TAG}`]: { object: { type: "tag", sha: tagObject } },
@@ -268,13 +268,13 @@ describe("release provenance identity", () => {
   const repository = { id: 1285835794, owner: { id: 252820863 } };
   const statement = () => ({
     _type: "https://in-toto.io/Statement/v1", predicateType: "https://slsa.dev/provenance/v1",
-    subject: [{ name: "pkg:npm/%40openclaw/babelfish@0.1.2", digest: { sha512: proof.sha512 } }],
+    subject: [{ name: "pkg:npm/%40openclaw/babelfish@0.1.3", digest: { sha512: proof.sha512 } }],
     predicate: {
       buildDefinition: {
         buildType: "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
-        externalParameters: { workflow: { repository: "https://github.com/openclaw/babelfish", path: ".github/workflows/release.yml", ref: "refs/tags/v0.1.2" } },
+        externalParameters: { workflow: { repository: "https://github.com/openclaw/babelfish", path: ".github/workflows/release.yml", ref: "refs/tags/v0.1.3" } },
         internalParameters: { github: { event_name: "push", repository_id: String(repository.id), repository_owner_id: String(repository.owner.id) } },
-        resolvedDependencies: [{ uri: "git+https://github.com/openclaw/babelfish@refs/tags/v0.1.2", digest: { gitCommit: proof.source } }],
+        resolvedDependencies: [{ uri: "git+https://github.com/openclaw/babelfish@refs/tags/v0.1.3", digest: { gitCommit: proof.source } }],
       },
       runDetails: { builder: { id: "https://github.com/actions/runner/github-hosted" }, metadata: { invocationId: "https://github.com/openclaw/babelfish/actions/runs/123/attempts/1" } },
     },
@@ -322,7 +322,7 @@ describe("failed-job publication retry admission", () => {
 describe("release admission helper boundaries", () => {
   it("uses the canonical repository URL for an empty endpoint", () => {
     expect(githubUrl("")).toBe("https://api.github.com/repos/openclaw/babelfish");
-    expect(githubUrl("git/ref/tags/v0.1.2")).toBe("https://api.github.com/repos/openclaw/babelfish/git/ref/tags/v0.1.2");
+    expect(githubUrl("git/ref/tags/v0.1.3")).toBe("https://api.github.com/repos/openclaw/babelfish/git/ref/tags/v0.1.3");
   });
   it("serializes the complete artifact admission output set without allowing line injection", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "babelfish-release-output-"));

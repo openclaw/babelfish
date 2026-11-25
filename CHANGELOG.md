@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.3 — 2026-11-25
+
+**Highlights:** Preserve imported plugin behavior, report invalid commands before mutation, and speed up CLI startup and fresh consumer validation.
+
 - Reject invalid package-check arguments before packing or writing proof, including a missing or empty `--tarball` path.
 
 - Refresh compatible Express, Vite, Rolldown, and transitive dependencies while preserving Node.js 22.19 support and the existing toolchain.

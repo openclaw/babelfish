@@ -188,7 +188,7 @@ export async function createHermesMcpServer(config: HermesBridgeConfig): Promise
     import("@modelcontextprotocol/sdk/types.js"),
   ]);
   const server = new Server(
-    { name: "babelfish", version: "0.1.2" },
+    { name: "babelfish", version: "0.1.3" },
     {
       capabilities: {
         tools: { listChanged: true },
